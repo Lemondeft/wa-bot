@@ -8,7 +8,6 @@ interface Message {
 const SYSTEM_PROMPT = `You are a helpful assistant that answers questions about the world.`
 
 export async function chat(history: Message[]): Promise<string> {
-    console.log('KEY:', JSON.stringify(process.env.VOIDAI_KEY))
   const res = await fetch('https://api.voidai.app/v1/chat/completions', {
     method: 'POST',
     headers: {
