@@ -11,9 +11,9 @@ A personal WhatsApp bot powered by an AI API with per-user chat history.
 ## Setup
 
 1. Clone the repo
-   ```bash
-   you might want to change the default fetch link, since im using voidai im using voidai's endpoint.
-   ```
+```bash
+   you might want to change the default fetch link, since im using openrouter, i will use their endpoint.
+```
 2. Install dependencies
 ```bash
    npm install
