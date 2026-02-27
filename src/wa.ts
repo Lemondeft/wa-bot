@@ -72,40 +72,39 @@ export async function startBot(): Promise<void> {
             const jid = msg.key?.remoteJid
             const msgId = msg.key?.id
 
-            if (!msg.message || !jid || !msgId) continue
-            if (jid.endsWith('@lid')) continue
+            if (!jid || !msgId) continue
             if (seen.has(msgId)) continue
             seen.add(msgId)
             setTimeout(() => seen.delete(msgId), 60000)
 
-            const text = (
-                msg.message.conversation ||
-                msg.message.extendedTextMessage?.text ||
-                ''
-            ).trim()
-
-            if (!text.startsWith('!ai') && text !== '!clear') continue
-
-            if (text === '!clear') {
-                clearHistory(jid)
-                await sock.sendMessage(jid, { text: 'Chat history cleared!' })
-                continue
-            }
-
-            const prompt = text.slice(4).trim()
-            if (!prompt) continue
-
-            console.log(`[${jid}] ${prompt}`)
-            const history = appendHistory(jid, 'user', prompt)
-
             try {
+                const text = (
+                    msg.message?.conversation ||
+                    msg.message?.extendedTextMessage?.text
+                )?.trim()
+
+                if (!text) continue
+
+                if (!text.startsWith('!ai') && text !== '!clear') continue
+
+                if (text === '!clear') {
+                    clearHistory(jid)
+                    await sock.sendMessage(jid, { text: 'Chat history cleared!' })
+                    continue
+                }
+
+                const prompt = text.slice(4).trim()
+                if (!prompt) continue
+
+                console.log(`[${jid}] ${prompt}`)
+                const history = appendHistory(jid, 'user', prompt)
+
                 const reply = await chat(history)
                 appendHistory(jid, 'assistant', reply)
-
                 await sendWithTyping(sock, jid, reply, msg)
 
-            } catch (err) {
-                console.error('Error:', err)
+            } catch (err: any) {
+                console.warn('Skipped message due to error:', err?.message)
             }
         }
     })
