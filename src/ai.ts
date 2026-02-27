@@ -20,7 +20,7 @@ export async function chat(history: Message[]): Promise<string> {
         { role: 'system', content: SYSTEM_PROMPT },
         ...history
       ],
-      max_tokens: 1000,
+      max_tokens: 5000,
       temperature: 0.7,
     })
   })
