@@ -65,7 +65,7 @@ export async function startBot(): Promise<void> {
                 const reply = await chat(history)
                 appendHistory(jid, 'assistant', reply)
                 const isGroup = jid.endsWith('@g.us')
-                await sock.sendMessage(jid, { text: reply }, { quoted: msg })
+                await sock.sendMessage(jid, { text: reply }, isGroup ? {} : { quoted: msg })
             } catch (err) {
                 console.error('Error:', err)
             }
