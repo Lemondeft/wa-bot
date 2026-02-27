@@ -23,7 +23,7 @@ export async function chat(history: Message[]): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.VOIDAI_KEY}`,
+      'Authorization': `Bearer ${process.env.KEY}`,
     },
     body: JSON.stringify({
       model: 'arcee-ai/trinity-large-preview:free',
