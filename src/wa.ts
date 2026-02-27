@@ -3,6 +3,43 @@ import qrcode from 'qrcode-terminal'
 import { appendHistory, clearHistory } from './history.js'
 import { chat } from './ai.js'
 
+function splitIntoChunks(text: string, maxSize = 150): string[] {
+    const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]
+    const chunks: string[] = []
+    let current = ''
+
+    for (const sentence of sentences) {
+        if ((current + sentence).length > maxSize && current) {
+            chunks.push(current.trim())
+            current = sentence
+        } else {
+            current += sentence
+        }
+    }
+
+    if (current.trim()) chunks.push(current.trim())
+    return chunks
+}
+
+async function sendWithTyping(sock: any, jid: string, text: string, quotedMsg?: any) {
+    const chunks = splitIntoChunks(text, 150)
+    const isGroup = jid.endsWith('@g.us')
+
+    for (let i = 0; i < chunks.length; i++) {
+        try { await sock.sendPresenceUpdate('composing', jid) } catch { }
+
+        const delay = Math.min((chunks[i]?.length ?? 50) * 25, 3000)
+        await new Promise(res => setTimeout(res, delay))
+
+        await sock.sendMessage(
+            jid,
+            { text: chunks[i] },
+            isGroup ? {} : (i === 0 ? { quoted: quotedMsg } : {})
+        )
+    }
+
+    try { await sock.sendPresenceUpdate('available', jid) } catch { }
+}
 export async function startBot(): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info')
     const { version } = await fetchLatestBaileysVersion()
@@ -32,11 +69,11 @@ export async function startBot(): Promise<void> {
         if (type !== 'notify') return
 
         for (const msg of messages) {
-            const jid = msg.key.remoteJid
-            if (!msg.message || !jid) continue
-            if (jid.endsWith('@lid')) continue
+            const jid = msg.key?.remoteJid
+            const msgId = msg.key?.id
 
-            const msgId = msg.key.id!
+            if (!msg.message || !jid || !msgId) continue
+            if (jid.endsWith('@lid')) continue
             if (seen.has(msgId)) continue
             seen.add(msgId)
             setTimeout(() => seen.delete(msgId), 60000)
@@ -64,8 +101,9 @@ export async function startBot(): Promise<void> {
             try {
                 const reply = await chat(history)
                 appendHistory(jid, 'assistant', reply)
-                const isGroup = jid.endsWith('@g.us')
-                await sock.sendMessage(jid, { text: reply }, isGroup ? {} : { quoted: msg })
+
+                await sendWithTyping(sock, jid, reply, msg)
+
             } catch (err) {
                 console.error('Error:', err)
             }
