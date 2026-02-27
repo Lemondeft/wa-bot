@@ -13,7 +13,10 @@ export async function startBot(): Promise<void> {
         auth: state,
         printQRInTerminal: false,
         version,
-        cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid)
+        cachedGroupMetadata: async (jid) => groupMetadataCache.get(jid),
+        getMessage: async (key) => {
+            return { conversation: '' }
+        }
     })
 
     sock.ev.on('groups.update', async (updates) => {
@@ -73,7 +76,7 @@ export async function startBot(): Promise<void> {
 
             const history = appendHistory(jid, 'user', prompt)
 
-            try { await sock.sendPresenceUpdate('composing', jid) } catch {}
+            try { await sock.sendPresenceUpdate('composing', jid) } catch { }
 
             try {
                 const reply = await chat(history)
@@ -84,7 +87,7 @@ export async function startBot(): Promise<void> {
                 console.error('send error:', err)
             }
 
-            try { await sock.sendPresenceUpdate('available', jid) } catch {}
+            try { await sock.sendPresenceUpdate('available', jid) } catch { }
         }
     })
 }
