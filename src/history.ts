@@ -18,7 +18,11 @@ function filePath(jid: string): string {
 export function loadHistory(jid: string): Message[] {
     const fp = filePath(jid);
     if (!fs.existsSync(fp)) return [];
-    return JSON.parse(fs.readFileSync(fp, 'utf-8')) as Message[];
+    try {
+        return JSON.parse(fs.readFileSync(fp, 'utf-8')) as Message[];
+    } catch {
+        return [];
+    }
 }
 
 export function saveHistory(jid: string, history: Message[]): void {

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx src/index.ts",
+    "dev:trace": "node --trace-warnings --loader tsx src/index.ts",
     "start": "node dist/index.js"
   },
   "keywords": [],

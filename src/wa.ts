@@ -1,7 +1,8 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, proto } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode-terminal'
 import { appendHistory, clearHistory } from './history.js'
 import { chat } from './ai.js'
+import { Boom } from '@hapi/boom'
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
     const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]
@@ -21,25 +22,34 @@ function splitIntoChunks(text: string, maxSize = 150): string[] {
     return chunks
 }
 
-async function sendWithTyping(sock: any, jid: string, text: string, quotedMsg?: any) {
+async function sendWithTypingAndQuote(
+    sock: any, 
+    jid: string, 
+    text: string, 
+    quotedMsg?: proto.IWebMessageInfo
+) {
     const chunks = splitIntoChunks(text, 150)
-    const isGroup = jid.endsWith('@g.us')
 
     for (let i = 0; i < chunks.length; i++) {
-        try { await sock.sendPresenceUpdate('composing', jid) } catch { }
+        try { 
+            await sock.sendPresenceUpdate('composing', jid) 
+        } catch { }
 
         const delay = Math.min((chunks[i]?.length ?? 50) * 25, 3000)
         await new Promise(res => setTimeout(res, delay))
 
-        await sock.sendMessage(
-            jid,
-            { text: chunks[i] },
-            isGroup ? {} : (i === 0 ? { quoted: quotedMsg } : {})
-        )
+        if (i === 0 && quotedMsg) {
+            await sock.sendMessage(jid, { text: chunks[i] }, { quoted: quotedMsg })
+        } else {
+            await sock.sendMessage(jid, { text: chunks[i] })
+        }
     }
 
-    try { await sock.sendPresenceUpdate('available', jid) } catch { }
+    try { 
+        await sock.sendPresenceUpdate('available', jid) 
+    } catch { }
 }
+
 export async function startBot(): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info')
     const { version } = await fetchLatestBaileysVersion()
@@ -48,7 +58,7 @@ export async function startBot(): Promise<void> {
         auth: state,
         version,
         printQRInTerminal: false,
-        getMessage: async () => ({ conversation: '' })
+        getMessage: async () => proto.Message.create({ conversation: '' })
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -56,21 +66,28 @@ export async function startBot(): Promise<void> {
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) qrcode.generate(qr, { small: true })
         if (connection === 'close') {
-            const code = (lastDisconnect?.error as any)?.output?.statusCode
-            if (code !== DisconnectReason.loggedOut) setTimeout(() => startBot(), 5000)
+            const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
+            if (statusCode !== DisconnectReason.loggedOut) {
+                setTimeout(() => startBot(), 5000)
+            }
         } else if (connection === 'open') {
-            console.log('Connected!')
+            console.log('Connected')
         }
     })
 
     const seen = new Set<string>()
+    const rateLimits = new Map<string, number>()
 
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    sock.ev.process(async (events) => {
+    if (events['messages.upsert']) {
+        const { messages, type } = events['messages.upsert']
+        
         if (type !== 'notify') return
 
         for (const msg of messages) {
             const jid = msg.key?.remoteJid
             const msgId = msg.key?.id
+            const isGroup = jid?.endsWith('@g.us')
 
             if (!jid || !msgId) continue
             if (seen.has(msgId)) continue
@@ -80,32 +97,62 @@ export async function startBot(): Promise<void> {
             try {
                 const text = (
                     msg.message?.conversation ||
-                    msg.message?.extendedTextMessage?.text
+                    msg.message?.extendedTextMessage?.text ||
+                    msg.message?.imageMessage?.caption ||
+                    msg.message?.videoMessage?.caption
                 )?.trim()
 
                 if (!text) continue
-
+                
+                if (msg.message?.pollCreationMessage || msg.message?.pollUpdateMessage) {
+                    continue
+                }
+                
                 if (!text.startsWith('!ai') && text !== '!clear') continue
 
+                const userId = msg.key.participant || jid
+                const lastCall = rateLimits.get(userId) || 0
+                const now = Date.now()
+                const cooldown = 3000
+
+                if (now - lastCall < cooldown) {
+                    const remaining = Math.ceil((cooldown - (now - lastCall)) / 1000)
+                    console.log(`[RATE LIMIT] ${userId.split('@')[0]} ${remaining}s`)
+                    
+                    await sock.sendMessage(jid, { text: `Wait ${remaining} seconds` }, { quoted: msg })
+                    continue
+                }
+                rateLimits.set(userId, now)
+
+                const sender = isGroup 
+                    ? msg.key.participant?.split('@')[0] 
+                    : jid.split('@')[0]
+                const chatType = isGroup ? 'GROUP' : 'DM'
+                
                 if (text === '!clear') {
                     clearHistory(jid)
-                    await sock.sendMessage(jid, { text: 'Chat history cleared!' })
+                    console.log(`[${chatType}] ${sender} !clear`)
+                    await sock.sendMessage(jid, { text: 'Chat history cleared' }, { quoted: msg })
                     continue
                 }
 
                 const prompt = text.slice(4).trim()
                 if (!prompt) continue
 
-                console.log(`[${jid}] ${prompt}`)
+                console.log(`[${chatType}] ${sender} ${prompt}`)
+                
                 const history = appendHistory(jid, 'user', prompt)
-
                 const reply = await chat(history)
                 appendHistory(jid, 'assistant', reply)
-                await sendWithTyping(sock, jid, reply, msg)
+                
+                console.log(`[${chatType}] BOT ${reply.slice(0, 50)}...`)
+                
+                await sendWithTypingAndQuote(sock, jid, reply, msg)
 
             } catch (err: any) {
-                console.warn('Skipped message due to error:', err?.message)
+                console.error(err?.message)
             }
         }
-    })
+    }
+})
 }
