@@ -23,31 +23,43 @@ function splitIntoChunks(text: string, maxSize = 150): string[] {
 }
 
 async function sendWithTypingAndQuote(
-    sock: any, 
-    jid: string, 
-    text: string, 
-    quotedMsg?: proto.IWebMessageInfo
+  sock: any,
+  jid: string,
+  text: string,
+  quotedMsg?: proto.IWebMessageInfo
 ) {
-    const chunks = splitIntoChunks(text, 150)
+  const chunks = splitIntoChunks(text, 150)
 
-    for (let i = 0; i < chunks.length; i++) {
-        try { 
-            await sock.sendPresenceUpdate('composing', jid) 
-        } catch { }
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!
 
-        const delay = Math.min((chunks[i]?.length ?? 50) * 25, 3000)
-        await new Promise(res => setTimeout(res, delay))
+    try {
+      await sock.sendPresenceUpdate('composing', jid)
+    } catch {}
 
-        if (i === 0 && quotedMsg) {
-            await sock.sendMessage(jid, { text: chunks[i] }, { quoted: quotedMsg })
-        } else {
-            await sock.sendMessage(jid, { text: chunks[i] })
-        }
+    const baseDelay = 300
+    const perChar = 18
+    const jitter = Math.random() * 300
+    const delay = Math.min(baseDelay + chunk.length * perChar + jitter, 2500)
+
+    await new Promise(res => setTimeout(res, delay))
+
+    if (i === 0 && quotedMsg) {
+      await sock.sendMessage(jid, { text: chunk }, { quoted: quotedMsg })
+    } else {
+      await sock.sendMessage(jid, { text: chunk })
     }
 
-    try { 
-        await sock.sendPresenceUpdate('available', jid) 
-    } catch { }
+    try {
+      await sock.sendPresenceUpdate('paused', jid)
+    } catch {}
+
+    await new Promise(res => setTimeout(res, 400 + Math.random() * 400))
+  }
+
+  try {
+    await sock.sendPresenceUpdate('available', jid)
+  } catch {}
 }
 
 export async function startBot(): Promise<void> {
