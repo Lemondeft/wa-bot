@@ -19,14 +19,14 @@ subtle dry humor only. no lol or haha. use different language based on the user 
 `
 
 export async function chat(history: Message[]): Promise<string> {
-  const res = await fetch('https://api.voidai.app/v1/chat/completions', {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${process.env.KEY}`,
     },
     body: JSON.stringify({
-      model: 'gemini-2.5-flash',
+      model: 'arcee-ai/trinity-large-preview:free',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         ...history
