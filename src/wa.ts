@@ -2,7 +2,6 @@ import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaile
 import qrcode from 'qrcode-terminal'
 import { appendHistory, clearHistory } from './history.js'
 import { chat } from './ai.js'
-import { Boom } from '@hapi/boom'
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
     const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]
@@ -78,7 +77,7 @@ export async function startBot(): Promise<void> {
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) qrcode.generate(qr, { small: true })
         if (connection === 'close') {
-            const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode
+            const statusCode = (lastDisconnect?.error as Error & { output?: { statusCode: number } })?.output?.statusCode
             if (statusCode !== DisconnectReason.loggedOut) {
                 setTimeout(() => startBot(), 5000)
             }
