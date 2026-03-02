@@ -1,30 +1,29 @@
 # WhatsApp AI Bot
 
-A personal WhatsApp bot powered by an AI API with per-user chat history.
+A personal WhatsApp bot powered by [VoidAI](https://voidai.app) with per-chat conversation history.
 
 ## Features
 
-- Reply to messages using `!ai <message>`
-- Remembers conversation history per user
+- Chat with AI using `!ai <message>`
+- Send an image with `!ai` to analyze it (multimodal)
+- Generate images with `!img <description>`
+- Per-chat conversation history
 - Clear history with `!clear`
 
 ## Setup
 
 1. Clone the repo
-```bash
-   you might want to change the default fetch link, since im using openrouter, i will use their endpoint.
-```
 2. Install dependencies
 ```bash
-   npm install
+npm install
 ```
 3. Create a `.env` file
 ```
-   KEY=your_key_here
+KEY=your_voidai_key_here
 ```
 4. Run
 ```bash
-   npm run dev
+npm run dev
 ```
 5. Scan the QR code with WhatsApp
 
@@ -32,5 +31,7 @@ A personal WhatsApp bot powered by an AI API with per-user chat history.
 
 | Command | Description |
 |---|---|
-| `!ai <message>` | Ask the AI anything |
-| `!clear` | Clear your chat history |
+| `!ai <message>` | Chat with the AI |
+| `!ai` _(with image)_ | Analyze an image |
+| `!img <description>` | Generate an image |
+| `!clear` | Clear your conversation history |
