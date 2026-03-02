@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { startBot } from './wa.js'
+import { startBot } from './wa.ts'
 
 process.on('unhandledRejection', (err) => {
     console.error('Unhandled rejection:', err)

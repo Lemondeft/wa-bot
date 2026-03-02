@@ -10,6 +10,7 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     
     "strict": true,
     "strictNullChecks": true,
@@ -17,7 +18,8 @@
     "noImplicitThis": true,
     "forceConsistentCasingInFileNames": true,
     
-    "allowJs": false
+    "allowJs": false,
+    "noEmit": true
   },
   "ts-node": {
     "esm": true,

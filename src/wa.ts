@@ -1,7 +1,7 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, proto } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode-terminal'
-import { appendHistory, clearHistory } from './history.js'
-import { chat } from './ai.js'
+import { appendHistory, clearHistory } from './history.ts'
+import { chat } from './ai.ts'
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
     const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]
