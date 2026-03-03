@@ -2,7 +2,7 @@ import 'dotenv/config'
 
 export async function generateImage(prompt: string): Promise<string | null> {
     try {
-        const res = await fetch('https://api.voidai.app/v1/chat/completions', {
+        const res = await fetch('https://beta.voidai.app/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
