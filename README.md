@@ -1,6 +1,6 @@
 # WhatsApp AI Bot
 
-A personal WhatsApp bot powered by [VoidAI](https://voidai.app) with per-chat conversation history.
+A personal WhatsApp bot powered by with per-chat conversation history.
 
 ## Features
 
