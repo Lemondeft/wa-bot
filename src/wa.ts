@@ -150,7 +150,7 @@ export async function startBot(): Promise<void> {
                         continue
                     }
 
-                    if (!text.startsWith('!ai') && !text.startsWith('!img') && text !== '!clear') continue
+                    if (!text.startsWith('!ai') && !text.startsWith('!img') && text !== '!clear' && !text.startsWith('!status')) continue
 
                     const userId = msg.key.participant || jid
                     const lastCall = rateLimits.get(userId) || 0
@@ -166,6 +166,10 @@ export async function startBot(): Promise<void> {
                     }
                     rateLimits.set(userId, now)
 
+                    if (text.startsWith('!status')) (
+                        await sock.sendMessage(jid, { text: 'Bot is running' }, { quoted: msg })
+                    )
+                    
                     if (text === '!clear') {
                         clearHistory(jid)
                         console.log(`[${chatType}] ${sender} !clear`)
