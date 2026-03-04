@@ -35,7 +35,10 @@ async function sendWithTypingAndQuote(
 
         try {
             await sock.sendPresenceUpdate('composing', jid)
-        } catch { }
+        } catch (err: any) {
+            console.error('[PRESENCE ERROR]', err?.message)
+            throw new Error('Connection lost during presence update')
+        }
 
         const baseDelay = 300
         const perChar = 18
@@ -44,10 +47,15 @@ async function sendWithTypingAndQuote(
 
         await new Promise(res => setTimeout(res, delay))
 
-        if (i === 0 && quotedMsg) {
-            await sock.sendMessage(jid, { text: chunk }, { quoted: quotedMsg })
-        } else {
-            await sock.sendMessage(jid, { text: chunk })
+        try {
+            if (i === 0 && quotedMsg) {
+                await sock.sendMessage(jid, { text: chunk }, { quoted: quotedMsg })
+            } else {
+                await sock.sendMessage(jid, { text: chunk })
+            }
+        } catch (err: any) {
+            console.error('[SEND ERROR]', err?.message)
+            throw new Error('Failed to send message')
         }
 
         try {
@@ -62,7 +70,23 @@ async function sendWithTypingAndQuote(
     } catch { }
 }
 
+// Global cleanup tracker
+let currentHealthCheck: NodeJS.Timeout | null = null
+let isReconnecting = false
+
 export async function startBot(): Promise<void> {
+    // Prevent duplicate instances
+    if (isReconnecting) {
+        console.log('[RECONNECT] Already reconnecting, skipping...')
+        return
+    }
+
+    // Clean up old health check
+    if (currentHealthCheck) {
+        clearInterval(currentHealthCheck)
+        currentHealthCheck = null
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState('auth_info')
     const { version } = await fetchLatestBaileysVersion()
 
@@ -70,25 +94,93 @@ export async function startBot(): Promise<void> {
         auth: state,
         version,
         printQRInTerminal: false,
-        getMessage: async () => proto.Message.create({ conversation: '' })
+        getMessage: async () => proto.Message.create({ conversation: '' }),
+        // Add connection timeout
+        connectTimeoutMs: 60000,
+        // Keep alive settings
+        keepAliveIntervalMs: 30000
     })
 
     sock.ev.on('creds.update', saveCreds)
 
+    let connectionClosed = false
+
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) qrcode.generate(qr, { small: true })
+        
         if (connection === 'close') {
+            connectionClosed = true
+            if (currentHealthCheck) {
+                clearInterval(currentHealthCheck)
+                currentHealthCheck = null
+            }
+            
             const statusCode = (lastDisconnect?.error as Error & { output?: { statusCode: number } })?.output?.statusCode
-            if (statusCode !== DisconnectReason.loggedOut) {
-                setTimeout(() => startBot(), 5000)
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+            
+            console.log(`[CONNECTION CLOSED] Status: ${statusCode}, Reconnect: ${shouldReconnect}`)
+            
+            if (shouldReconnect) {
+                isReconnecting = true
+                setTimeout(() => {
+                    isReconnecting = false
+                    startBot()
+                }, 5000)
             }
         } else if (connection === 'open') {
-            console.log('Connected')
+            console.log('[CONNECTED] Bot is online')
+            connectionClosed = false
+            isReconnecting = false
         }
     })
 
     const seen = new Set<string>()
     const rateLimits = new Map<string, number>()
+    let lastActivity = Date.now()
+
+    currentHealthCheck = setInterval(async () => {
+        if (connectionClosed) {
+            console.log('[HEALTH CHECK] Connection already closed, skipping')
+            return
+        }
+
+        const inactiveMins = (Date.now() - lastActivity) / 60000
+        
+        const ws = (sock as any).ws
+        if (!ws || ws.readyState !== 1) {
+            console.warn('[HEALTH CHECK] WebSocket not open (state: ' + (ws?.readyState ?? 'null') + '), reconnecting...')
+            clearInterval(currentHealthCheck!)
+            currentHealthCheck = null
+            sock.end(undefined)
+            
+            isReconnecting = true
+            setTimeout(() => {
+                isReconnecting = false
+                startBot()
+            }, 3000)
+            return
+        }
+
+        if (inactiveMins >= 5) {
+            console.warn(`[HEALTH CHECK] Inactive for ${Math.floor(inactiveMins)}min, pinging...`)
+            try {
+                await sock.sendPresenceUpdate('available')
+                console.log('[HEALTH CHECK] Ping OK')
+                lastActivity = Date.now()
+            } catch (err: any) {
+                console.error('[HEALTH CHECK] Ping failed:', err?.message)
+                clearInterval(currentHealthCheck!)
+                currentHealthCheck = null
+                sock.end(undefined)
+                
+                isReconnecting = true
+                setTimeout(() => {
+                    isReconnecting = false
+                    startBot()
+                }, 3000)
+            }
+        }
+    }, 60000)
 
     sock.ev.process(async (events) => {
         if (events['messages.upsert']) {
@@ -105,6 +197,8 @@ export async function startBot(): Promise<void> {
                 if (seen.has(msgId)) continue
                 seen.add(msgId)
                 setTimeout(() => seen.delete(msgId), 60000)
+                
+                lastActivity = Date.now() 
 
                 try {
                     const text = (
@@ -166,9 +260,10 @@ export async function startBot(): Promise<void> {
                     }
                     rateLimits.set(userId, now)
 
-                    if (text.startsWith('!status')) (
-                        await sock.sendMessage(jid, { text: 'Bot is running' }, { quoted: msg })
-                    )
+                    if (text.startsWith('!status')) {
+                        await sock.sendMessage(jid, { text: 'Bot is running ✅' }, { quoted: msg })
+                        continue
+                    }
                     
                     if (text === '!clear') {
                         clearHistory(jid)
@@ -186,7 +281,6 @@ export async function startBot(): Promise<void> {
                         let userContent: string | Array<any>
 
                         if (imageBase64) {
-                            // Multimodal: text + image
                             userContent = prompt
                                 ? [
                                     { type: 'text', text: prompt },
@@ -205,7 +299,21 @@ export async function startBot(): Promise<void> {
 
                         console.log(`[${chatType}] BOT ${reply.slice(0, 50)}...`)
 
-                        await sendWithTypingAndQuote(sock, jid, reply, msg)
+                        try {
+                            await sendWithTypingAndQuote(sock, jid, reply, msg)
+                        } catch (err: any) {
+                            console.error('[CRITICAL] Send failed, forcing reconnect:', err?.message)
+                            clearInterval(currentHealthCheck!)
+                            currentHealthCheck = null
+                            sock.end(undefined)
+                            
+                            isReconnecting = true
+                            setTimeout(() => {
+                                isReconnecting = false
+                                startBot()
+                            }, 3000)
+                            return
+                        }
                         continue
                     }
 
@@ -239,7 +347,7 @@ export async function startBot(): Promise<void> {
                     }
 
                 } catch (err: any) {
-                    console.error(err?.message)
+                    console.error('[MESSAGE HANDLER ERROR]', err?.message)
                 }
             }
         }
