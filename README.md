@@ -19,7 +19,7 @@ npm install
 ```
 3. Create a `.env` file
 ```
-KEY=your_voidai_key_here
+KEY=key
 ```
 4. Run
 ```bash
