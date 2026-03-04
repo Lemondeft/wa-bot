@@ -1,64 +1,91 @@
 import 'dotenv/config'
 
-export async function generateImage(prompt: string): Promise<string | null> {
-    try {
-        const res = await fetch('https://beta.voidai.app/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.KEY}`,
-            },
-            body: JSON.stringify({
-                model: 'gemini-3.1-flash-image-preview',
-                messages: [
-                    { role: 'user', content: prompt }
-                ],
-                max_tokens: 1000
-            })
+const MAX_RETRIES = 3
+
+async function callImageAPI(prompt: string): Promise<any> {
+    const res = await fetch('https://beta.voidai.app/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.KEY}`,
+        },
+        body: JSON.stringify({
+            model: 'gemini-2.5-flash-image',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 200000,
         })
+    })
 
-        const data = await res.json() as any
-        console.log('[IMAGE DEBUG] Status:', res.status)
-        console.log('[IMAGE DEBUG] Full response:', JSON.stringify(data, null, 2))
-
-        // Check ALL possible fields
-        const content = data.choices?.[0]?.message?.content
-        const toolCalls = data.choices?.[0]?.message?.tool_calls
-        const imageData = data.data
-        const error = data.error
-        
-        console.log('[IMAGE DEBUG] Content:', content)
-        console.log('[IMAGE DEBUG] Tool calls:', toolCalls)
-        console.log('[IMAGE DEBUG] Image data:', imageData)
-        console.log('[IMAGE DEBUG] Error:', error)
-        console.log('[IMAGE DEBUG] All choices:', JSON.stringify(data.choices, null, 2))
-
-        let imageUrl = null
-        if (content) {
-            const match = content.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/)
-            imageUrl = match?.[1]
-        }
-
-        if (!imageUrl && content) {
-            const match = content.match(/https?:\/\/[^\s\)"'\]]+/i)
-            imageUrl = match?.[0]
-        }
-
-        if (!imageUrl && imageData?.[0]?.url) {
-            imageUrl = imageData[0].url
-        }
-
-        if (!imageUrl && imageData?.[0]?.b64_json) {
-            console.log('[IMAGE DEBUG] Got base64 image, converting...')
-            imageUrl = `data:image/png;base64,${imageData[0].b64_json}`
-        }
-
-        console.log('[IMAGE DEBUG] Final URL:', imageUrl)
-
-        return imageUrl
-
-    } catch (err: any) {
-        console.error('[IMAGE ERROR]', err?.message)
-        return null
+    if (res.status === 429) {
+        throw new Error('rate limited')
     }
+
+    return res.json()
+}
+
+export async function generateImage(prompt: string): Promise<string | null> {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            if (attempt > 0) {
+                const delay = 3000 * attempt
+                console.log(`[IMAGE] Retry ${attempt}/${MAX_RETRIES} in ${delay / 1000}s...`)
+                await new Promise(res => setTimeout(res, delay))
+            }
+
+            const data = await callImageAPI(prompt) as any
+
+            if (data.error) {
+                console.error('[IMAGE ERROR]', data.error)
+                if (data.error?.type === 'rate_limit' || data.error?.code === 429) continue
+                return null
+            }
+
+            const message = data.choices?.[0]?.message
+
+        if (Array.isArray(message?.images)) {
+            for (const img of message.images) {
+                const url = typeof img.image_url === 'string'
+                    ? img.image_url
+                    : img.image_url?.url
+                if (url) return url
+            }
+        }
+
+        if (Array.isArray(message?.content)) {
+            for (const item of message.content) {
+                if (item.type === 'image_url') {
+                    const raw = typeof item.image_url === 'string'
+                        ? item.image_url
+                        : item.image_url?.url
+                    if (raw) {
+                        if (raw.startsWith('http') || raw.startsWith('data:')) return raw
+                        return `data:image/png;base64,${raw}`
+                    }
+                }
+            }
+        }
+
+        const textContent = typeof message?.content === 'string' 
+            ? message.content 
+            : message?.content?.find((c: any) => c.type === 'text')?.text
+
+        if (textContent) {
+            const markdownMatch = textContent.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/)
+            if (markdownMatch?.[1]) return markdownMatch[1]
+            
+            const urlMatch = textContent.match(/https?:\/\/[^\s\)"'\]]+/i)
+            if (urlMatch?.[0]) return urlMatch[0]
+        }
+
+            return null
+
+        } catch (err: any) {
+            if (err?.message === 'rate limited') continue
+            console.error('[IMAGE ERROR]', err?.message)
+            return null
+        }
+    }
+
+    console.error('[IMAGE ERROR] Max retries exceeded')
+    return 'RATE_LIMITED'
 }
