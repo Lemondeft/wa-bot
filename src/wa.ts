@@ -4,8 +4,8 @@ import { appendHistory, clearHistory } from './history.ts'
 import { chat } from './ai.ts'
 import { generateImage } from './image.ts'
 
-const RECONNECT_DELAY = 1200000
-const HEALTH_CHECK_INTERVAL = 60000
+const RECONNECT_DELAY = 10000
+const HEALTH_CHECK_INTERVAL = 200000
 const INACTIVE_THRESHOLD = 5
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
