@@ -201,7 +201,7 @@ export async function startBot(): Promise<void> {
                 rateLimits.set(userId, now)
 
                 if (text.startsWith('!status')) {
-                    await sock.sendMessage(jid, { text: 'Bot is running ✅' }, { quoted: msg })
+                    await sock.sendMessage(jid, { text: 'Bot is running' }, { quoted: msg })
                     continue
                 }
 
@@ -252,9 +252,9 @@ export async function startBot(): Promise<void> {
                     console.log(`[${tag}] ${sender} !img ${prompt}`)
                     await sock.sendMessage(jid, { text: 'generating image...' }, { quoted: msg })
 
-                    const imageUrl = await generateImage(prompt)
-                    if (!imageUrl || imageUrl === 'RATE_LIMITED') {
-                        const msg_text = imageUrl === 'RATE_LIMITED' ? 'rate limited, try again later' : 'failed to generate image'
+                    const result = await generateImage(prompt)
+                    if (!result || result === 'RATE_LIMITED') {
+                        const msg_text = result === 'RATE_LIMITED' ? 'rate limited, try again later' : 'failed to generate image'
                         await sock.sendMessage(jid, { text: msg_text }, { quoted: msg })
                         isProcessing = false
                         continue
@@ -262,17 +262,17 @@ export async function startBot(): Promise<void> {
 
                     try {
                         let imgBuffer: Buffer
-                        if (imageUrl.startsWith('data:image')) {
-                            const base64Data = imageUrl.split(',')[1]
+                        if (result.url.startsWith('data:image')) {
+                            const base64Data = result.url.split(',')[1]
                             if (!base64Data) throw new Error('Invalid base64 format')
                             imgBuffer = Buffer.from(base64Data, 'base64')
                         } else {
-                            const response = await fetch(imageUrl)
+                            const response = await fetch(result.url)
                             if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
                             imgBuffer = Buffer.from(await response.arrayBuffer())
                         }
 
-                        await sock.sendMessage(jid, { image: imgBuffer, caption: prompt }, { quoted: msg })
+                        await sock.sendMessage(jid, { image: imgBuffer, caption: result.caption || prompt }, { quoted: msg })
                     } catch (err: any) {
                         console.error(`[${tag}] Image send failed:`, err?.message)
                         await sock.sendMessage(jid, { text: 'failed to send image: ' + err?.message }, { quoted: msg })

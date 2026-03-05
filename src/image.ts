@@ -23,7 +23,12 @@ async function callImageAPI(prompt: string): Promise<any> {
     return res.json()
 }
 
-export async function generateImage(prompt: string): Promise<string | null> {
+export interface ImageResult {
+    url: string
+    caption?: string
+}
+
+export async function generateImage(prompt: string): Promise<ImageResult | 'RATE_LIMITED' | null> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
             if (attempt > 0) {
@@ -42,12 +47,18 @@ export async function generateImage(prompt: string): Promise<string | null> {
 
             const message = data.choices?.[0]?.message
 
+        const textContent = typeof message?.content === 'string' 
+            ? message.content 
+            : message?.content?.find((c: any) => c.type === 'text')?.text
+
+        const caption = textContent?.replace(/!\[.*?\]\(https?:\/\/[^\)]+\)/g, '').replace(/https?:\/\/[^\s\)"'\]]+/gi, '').trim() || undefined
+
         if (Array.isArray(message?.images)) {
             for (const img of message.images) {
                 const url = typeof img.image_url === 'string'
                     ? img.image_url
                     : img.image_url?.url
-                if (url) return url
+                if (url) return { url, caption }
             }
         }
 
@@ -58,23 +69,19 @@ export async function generateImage(prompt: string): Promise<string | null> {
                         ? item.image_url
                         : item.image_url?.url
                     if (raw) {
-                        if (raw.startsWith('http') || raw.startsWith('data:')) return raw
-                        return `data:image/png;base64,${raw}`
+                        const url = raw.startsWith('http') || raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`
+                        return { url, caption }
                     }
                 }
             }
         }
 
-        const textContent = typeof message?.content === 'string' 
-            ? message.content 
-            : message?.content?.find((c: any) => c.type === 'text')?.text
-
         if (textContent) {
             const markdownMatch = textContent.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/)
-            if (markdownMatch?.[1]) return markdownMatch[1]
+            if (markdownMatch?.[1]) return { url: markdownMatch[1], caption }
             
             const urlMatch = textContent.match(/https?:\/\/[^\s\)"'\]]+/i)
-            if (urlMatch?.[0]) return urlMatch[0]
+            if (urlMatch?.[0]) return { url: urlMatch[0], caption }
         }
 
             return null
