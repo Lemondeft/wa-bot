@@ -10,7 +10,7 @@ async function callImageAPI(prompt: string): Promise<any> {
             'Authorization': `Bearer ${process.env.KEY}`,
         },
         body: JSON.stringify({
-            model: 'gemini-2.5-flash-image',
+            model: 'gemini-3.1-flash-image-preview',
             messages: [{ role: 'user', content: prompt }],
             max_tokens: 200000,
         })
