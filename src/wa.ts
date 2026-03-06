@@ -3,9 +3,10 @@ import qrcode from 'qrcode-terminal'
 import { appendHistory, clearHistory } from './history.ts'
 import { chat } from './ai.ts'
 import { generateImage } from './image.ts'
+import sharp from 'sharp'
 
-const RECONNECT_DELAY = 3000 
-const HEALTH_CHECK_INTERVAL = 300000 
+const RECONNECT_DELAY = 3000
+const HEALTH_CHECK_INTERVAL = 300000
 const INACTIVE_THRESHOLD = 5
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
@@ -188,7 +189,7 @@ export async function startBot(): Promise<void> {
 
                 if (!text) continue
                 if (msg.message?.pollCreationMessage || msg.message?.pollUpdateMessage) continue
-                if (!text.startsWith('!ai') && !text.startsWith('!img') && text !== '!clear' && !text.startsWith('!status')) continue
+                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && text !== '!clear' && !text.startsWith('!status')) continue
 
                 const userId = msg.key.participant || jid
                 const now = Date.now()
@@ -209,6 +210,44 @@ export async function startBot(): Promise<void> {
                     clearHistory(jid)
                     console.log(`[${tag}] ${sender} !clear`)
                     await sock.sendMessage(jid, { text: 'Chat history cleared' }, { quoted: msg })
+                    continue
+                }
+
+                if (text.startsWith('!sticker')) {
+                    const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+                    const imageMsg = quoteMsg?.imageMessage || msg.message?.imageMessage
+
+                    if (!imageMsg) {
+                        await sock.sendMessage(jid, { text: 'Please send an image with a caption "!sticker" or reply to an image with "!sticker"' }, { quoted: msg })
+                        continue
+                    }
+
+                    isProcessing = true
+                    console.log(`[${tag}] ${sender} !sticker`)
+
+                    try {
+                        const buffer = await downloadMediaMessage(
+                            quoteMsg ? { message: quoteMsg, key: msg.key } : msg, 'buffer',
+                            {},
+                            {
+                                logger: silentLogger,
+                                reuploadRequest: sock.updateMediaMessage
+                            }
+                        )
+
+                        const webpBuffer = await sharp(buffer as Buffer)
+                        .resize(512, 512, { fit: 'contain',
+                            background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                        .webp({ quality: 80 })
+                        .toBuffer()
+                        
+                        await sock.sendMessage(jid, { sticker: webpBuffer }, { quoted: msg })
+                        console.log(`[${tag}] ${sender} sticker sent`)
+                    } catch (err: any) {
+                        console.error(`[${tag}] Sticker creation failed:`, err?.message)
+                        await sock.sendMessage(jid, { text: 'Failed to create sticker: ' + err?.message }, { quoted: msg })
+                    }
+                    isProcessing = false
                     continue
                 }
 
