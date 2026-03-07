@@ -259,6 +259,7 @@ export async function startBot(): Promise<void> {
 
                 if (text.startsWith('!reveal')) {
                     const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId
+                    console.log(`[REVEAL] Looking for quotedId: ${quotedId}, cache keys: [${[...viewOnceCache.keys()].join(', ')}]`)
 
                     if (!quotedId) {
                         await sock.sendMessage(jid, { text: 'Please reply to a view-once message with "!reveal"' }, { quoted: msg })
