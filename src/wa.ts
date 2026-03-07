@@ -175,6 +175,12 @@ export async function startBot(): Promise<void> {
 
             lastActivity = Date.now()
 
+            // Debug: log message structure keys
+            const msgKeys = msg.message ? Object.keys(msg.message) : []
+            if (msgKeys.some(k => k.toLowerCase().includes('viewonce') || k.toLowerCase().includes('ephemeral'))) {
+                console.log(`[DEBUG] Message keys: ${JSON.stringify(msgKeys)}, id: ${msgId}`)
+            }
+
             const viewOnceMsg = msg.message?.viewOnceMessageV2?.message
                 || msg.message?.viewOnceMessage?.message
                 || msg.message?.viewOnceMessageV2Extension?.message
