@@ -278,8 +278,13 @@ export async function startBot(): Promise<void> {
                     if (!cached) {
                         isProcessing = true
                         try {
+                            const quotedKey = {
+                                remoteJid: jid,
+                                id: quotedId,
+                                participant: msg.message?.extendedTextMessage?.contextInfo?.participant
+                            }
                             const buffer = await downloadMediaMessage(
-                                { message: quoteMsg, key: msg.key },
+                                { message: viewOnceMsg, key: quotedKey } as any,
                                 'buffer',
                                 {},
                                 { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
