@@ -8,7 +8,9 @@ import sharp from 'sharp'
 const RECONNECT_DELAY = 3000
 const HEALTH_CHECK_INTERVAL = 300000
 const INACTIVE_THRESHOLD = 5
-const viewOnceCache = new Map<string, { buffer: Buffer, timestamp: number, mimetype: string }>()
+type ViewOnceCacheEntry = { buffer: Buffer, timestamp: number, mimetype: string }
+
+const viewOnceCache = new Map<string, ViewOnceCacheEntry>()
 const viewOnceAliasCache = new Map<string, { targetId: string, timestamp: number }>()
 const VIEWONCE_CACHE_TTL = 3600000
 
@@ -54,7 +56,23 @@ function getViewOnceMedia(viewOnceMsg: any) {
 function getViewOnceMimeType(viewOnceMsg: any) {
     const media = getViewOnceMedia(viewOnceMsg)
     if (media?.mimetype) return media.mimetype
-    return viewOnceMsg?.imageMessage ? 'image/jpeg' : 'image/jpeg'
+    if (viewOnceMsg?.videoMessage) return 'video/mp4'
+    return 'image/jpeg'
+}
+
+function cacheViewOnce(id: string, buffer: Buffer, mimetype: string) {
+    viewOnceCache.set(id, {
+        buffer,
+        timestamp: Date.now(),
+        mimetype
+    })
+}
+
+async function sendBufferedMedia(sock: any, jid: string, buffer: Buffer, mimetype: string, quoted: proto.IWebMessageInfo, caption = 'Revealed') {
+    const media = mimetype.startsWith('video')
+        ? { video: buffer, caption }
+        : { image: buffer, caption }
+    await sock.sendMessage(jid, media, { quoted })
 }
 
 function inferMimeTypeFromBuffer(buffer: Buffer): string {
@@ -250,11 +268,7 @@ export async function startBot(): Promise<void> {
                             fullMsg as any, 'buffer', {},
                             { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
                         )
-                        viewOnceCache.set(normalizedMsgId, {
-                            buffer: buffer as Buffer,
-                            timestamp: Date.now(),
-                            mimetype: getViewOnceMimeType(viewOnceMsg)
-                        })
+                        cacheViewOnce(normalizedMsgId, buffer as Buffer, getViewOnceMimeType(viewOnceMsg))
                         console.log(`[CACHE] Cached: ${normalizedMsgId}`)
                     } catch (err: any) {
                         console.error(`[CACHE] Failed ${normalizedMsgId}:`, err?.message)
@@ -287,11 +301,7 @@ export async function startBot(): Promise<void> {
                     )
                     if ((buffer as Buffer).byteLength > 0) {
                         const shellViewOnceMsg = extractViewOnceMessage(msg.message)
-                        viewOnceCache.set(normalizedMsgId, {
-                            buffer: buffer as Buffer,
-                            timestamp: Date.now(),
-                            mimetype: getViewOnceMimeType(shellViewOnceMsg)
-                        })
+                        cacheViewOnce(normalizedMsgId, buffer as Buffer, getViewOnceMimeType(shellViewOnceMsg))
                         console.log(`[CACHE] Cached: ${normalizedMsgId}`)
                     }
                 } catch {
@@ -307,11 +317,7 @@ export async function startBot(): Promise<void> {
                             msg, 'buffer', {},
                             { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
                         )
-                        viewOnceCache.set(normalizedMsgId, {
-                            buffer: buffer as Buffer,
-                            timestamp: Date.now(),
-                            mimetype: getViewOnceMimeType(viewOnceMsg)
-                        })
+                        cacheViewOnce(normalizedMsgId, buffer as Buffer, getViewOnceMimeType(viewOnceMsg))
                         console.log(`[CACHE] Cached: ${normalizedMsgId}`)
                     } catch (err: any) {
                         console.error(`[CACHE] Failed ${normalizedMsgId}:`, err?.message)
@@ -397,11 +403,7 @@ export async function startBot(): Promise<void> {
                     const cached = viewOnceCache.get(normalizedQuotedId) || viewOnceCache.get(resolvedQuotedId)
 
                     if (cached) {
-                        const isVideo = cached.mimetype.startsWith('video')
-                        const media = isVideo
-                            ? { video: cached.buffer, caption: 'Revealed' }
-                            : { image: cached.buffer, caption: 'Revealed' }
-                        await sock.sendMessage(jid, media, { quoted: msg })
+                        await sendBufferedMedia(sock, jid, cached.buffer, cached.mimetype, msg)
                         console.log(`[${tag}] ${sender} revealed (cached: ${normalizedQuotedId} -> ${resolvedQuotedId}, ${cached.mimetype})`)
                         continue
                     }
@@ -464,24 +466,12 @@ export async function startBot(): Promise<void> {
                     }
 
                     if (revealedBuffer) {
-                        viewOnceCache.set(normalizedQuotedId, {
-                            buffer: revealedBuffer,
-                            timestamp: Date.now(),
-                            mimetype: revealedMimeType
-                        })
+                        cacheViewOnce(normalizedQuotedId, revealedBuffer, revealedMimeType)
                         if (resolvedQuotedId !== normalizedQuotedId) {
-                            viewOnceCache.set(resolvedQuotedId, {
-                                buffer: revealedBuffer,
-                                timestamp: Date.now(),
-                                mimetype: revealedMimeType
-                            })
+                            cacheViewOnce(resolvedQuotedId, revealedBuffer, revealedMimeType)
                         }
 
-                        const isVideo = revealedMimeType.startsWith('video')
-                        const media = isVideo
-                            ? { video: revealedBuffer, caption: 'Revealed' }
-                            : { image: revealedBuffer, caption: 'Revealed' }
-                        await sock.sendMessage(jid, media, { quoted: msg })
+                        await sendBufferedMedia(sock, jid, revealedBuffer, revealedMimeType, msg)
                         console.log(`[${tag}] ${sender} revealed (direct)`)
                         isProcessing = false
                         continue
@@ -498,47 +488,47 @@ export async function startBot(): Promise<void> {
                     const quoteMsg = contextInfo?.quotedMessage
                     const imageMsg = quoteMsg?.imageMessage || msg.message?.imageMessage
 
-                if (!imageMsg) {
-                    await sock.sendMessage(jid, { text: 'Please send an image with a caption "!sticker" or reply to an image with "!sticker"' }, { quoted: msg })
+                    if (!imageMsg) {
+                        await sock.sendMessage(jid, { text: 'Please send an image with a caption "!sticker" or reply to an image with "!sticker"' }, { quoted: msg })
+                        continue
+                    }
+
+                    isProcessing = true
+                    console.log(`[${tag}] ${sender} !sticker`)
+
+                    try {
+                        const quotedKey = {
+                            remoteJid: contextInfo?.remoteJid || jid,
+                            id: contextInfo?.stanzaId,
+                            participant: contextInfo?.participant
+                        }
+                        const mediaSource = quoteMsg
+                            ? { message: quoteMsg, key: quotedKey.id ? quotedKey : msg.key }
+                            : msg
+                        const buffer = await downloadMediaMessage(
+                            mediaSource as any,
+                            'buffer',
+                            {},
+                            { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                        )
+
+                        const webpBuffer = await sharp(buffer as Buffer)
+                            .resize(512, 512, {
+                                fit: 'contain',
+                                background: { r: 0, g: 0, b: 0, alpha: 0 }
+                            })
+                            .webp({ quality: 80 })
+                            .toBuffer()
+
+                        await sock.sendMessage(jid, { sticker: webpBuffer }, { quoted: msg })
+                        console.log(`[${tag}] ${sender} sticker sent`)
+                    } catch (err: any) {
+                        console.error(`[${tag}] Sticker creation failed:`, err?.message)
+                        await sock.sendMessage(jid, { text: 'Failed to create sticker: ' + err?.message }, { quoted: msg })
+                    }
+                    isProcessing = false
                     continue
                 }
-
-                isProcessing = true
-                console.log(`[${tag}] ${sender} !sticker`)
-
-                try {
-                    const quotedKey = {
-                        remoteJid: contextInfo?.remoteJid || jid,
-                        id: contextInfo?.stanzaId,
-                        participant: contextInfo?.participant
-                    }
-                    const mediaSource = quoteMsg
-                        ? { message: quoteMsg, key: quotedKey.id ? quotedKey : msg.key }
-                        : msg
-                    const buffer = await downloadMediaMessage(
-                        mediaSource as any,
-                        'buffer',
-                        {},
-                        { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
-                    )
-
-                    const webpBuffer = await sharp(buffer as Buffer)
-                        .resize(512, 512, {
-                            fit: 'contain',
-                            background: { r: 0, g: 0, b: 0, alpha: 0 }
-                        })
-                        .webp({ quality: 80 })
-                        .toBuffer()
-
-                    await sock.sendMessage(jid, { sticker: webpBuffer }, { quoted: msg })
-                    console.log(`[${tag}] ${sender} sticker sent`)
-                } catch (err: any) {
-                    console.error(`[${tag}] Sticker creation failed:`, err?.message)
-                    await sock.sendMessage(jid, { text: 'Failed to create sticker: ' + err?.message }, { quoted: msg })
-                }
-                isProcessing = false
-                continue
-            }
 
             if (text.startsWith('!ai')) {
                 const prompt = text.slice(4).trim()
