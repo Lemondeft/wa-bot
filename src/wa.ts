@@ -371,7 +371,8 @@ export async function startBot(): Promise<void> {
                 }
 
                 if (text.startsWith('!reveal')) {
-                    const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId
+                    const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+                    const quotedId = contextInfo?.stanzaId
 
                     if (!quotedId) {
                         await sock.sendMessage(jid, { text: 'Please reply to a view-once message with "!reveal"' }, { quoted: msg })
@@ -392,33 +393,84 @@ export async function startBot(): Promise<void> {
                         continue
                     }
 
-                    // Try to extract view-once from quoted context (rarely available)
-                    const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-                    const viewOnceMsg = extractViewOnceMessage(quoteMsg)
+                    const quoteMsg = contextInfo?.quotedMessage
+                    const quotedViewOnceMsg = extractViewOnceMessage(quoteMsg)
+                    const quotedRemoteJid = contextInfo?.remoteJid || jid
+                    const quotedParticipant = contextInfo?.participant
 
-                    if (viewOnceMsg) {
-                        isProcessing = true
-                        try {
-                            const quotedKey = {
-                                remoteJid: jid,
-                                id: quotedId,
-                                participant: msg.message?.extendedTextMessage?.contextInfo?.participant
+                    const keyCandidates = [
+                        { remoteJid: quotedRemoteJid, id: quotedId, participant: quotedParticipant },
+                        { remoteJid: jid, id: quotedId, participant: quotedParticipant },
+                        { remoteJid: quotedRemoteJid, id: resolvedQuotedId, participant: quotedParticipant },
+                        { remoteJid: jid, id: resolvedQuotedId, participant: quotedParticipant }
+                    ]
+
+                    const uniqueKeyCandidates = keyCandidates.filter((candidate, index, arr) => {
+                        return arr.findIndex((other) => (
+                            other.remoteJid === candidate.remoteJid
+                            && other.id === candidate.id
+                            && other.participant === candidate.participant
+                        )) === index
+                    })
+
+                    const messageCandidates = [quoteMsg, quotedViewOnceMsg, undefined].filter((candidate, index, arr) => {
+                        return arr.indexOf(candidate) === index
+                    })
+
+                    isProcessing = true
+                    let revealedBuffer: Buffer | null = null
+                    let revealedMimeType = getViewOnceMimeType(quotedViewOnceMsg)
+
+                    for (const keyCandidate of uniqueKeyCandidates) {
+                        if (revealedBuffer) break
+                        for (const messageCandidate of messageCandidates) {
+                            if (revealedBuffer) break
+                            try {
+                                const mediaTarget = messageCandidate
+                                    ? { message: messageCandidate, key: keyCandidate }
+                                    : { key: keyCandidate }
+                                const buffer = await downloadMediaMessage(
+                                    mediaTarget as any,
+                                    'buffer',
+                                    {},
+                                    { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                                )
+                                if ((buffer as Buffer).byteLength > 0) {
+                                    revealedBuffer = buffer as Buffer
+                                    if (messageCandidate && (messageCandidate as any)?.videoMessage) {
+                                        revealedMimeType = (messageCandidate as any).videoMessage.mimetype || 'video/mp4'
+                                    }
+                                }
+                            } catch {
                             }
-                            const buffer = await downloadMediaMessage(
-                                { message: viewOnceMsg, key: quotedKey } as any,
-                                'buffer',
-                                {},
-                                { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
-                            )
-                            await sock.sendMessage(jid, { image: buffer as Buffer, caption: 'Revealed' }, { quoted: msg })
-                            console.log(`[${tag}] ${sender} revealed (downloaded)`)
-                        } catch (err: any) {
-                            console.error(`[${tag}] Failed to reveal:`, err?.message)
-                            await sock.sendMessage(jid, { text: 'Failed to reveal. The view-once may have already been opened.' }, { quoted: msg })
                         }
+                    }
+
+                    if (revealedBuffer) {
+                        viewOnceCache.set(normalizedQuotedId, {
+                            buffer: revealedBuffer,
+                            timestamp: Date.now(),
+                            mimetype: revealedMimeType
+                        })
+                        if (resolvedQuotedId !== normalizedQuotedId) {
+                            viewOnceCache.set(resolvedQuotedId, {
+                                buffer: revealedBuffer,
+                                timestamp: Date.now(),
+                                mimetype: revealedMimeType
+                            })
+                        }
+
+                        const isVideo = revealedMimeType.startsWith('video')
+                        const media = isVideo
+                            ? { video: revealedBuffer, caption: 'Revealed' }
+                            : { image: revealedBuffer, caption: 'Revealed' }
+                        await sock.sendMessage(jid, media, { quoted: msg })
+                        console.log(`[${tag}] ${sender} revealed (direct)`)
                         isProcessing = false
                         continue
                     }
+
+                    isProcessing = false
 
                     await sock.sendMessage(jid, { text: 'View-once not found in cache. The bot must be online when the view-once is sent to cache it.' }, { quoted: msg })
                     continue
