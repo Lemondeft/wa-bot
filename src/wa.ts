@@ -38,6 +38,25 @@ function resolveViewOnceId(id: string): string {
     return current
 }
 
+function extractViewOnceMessage(message: any) {
+    return message?.viewOnceMessageV2?.message
+        || message?.viewOnceMessage?.message
+        || message?.viewOnceMessageV2Extension?.message
+        || message?.ephemeralMessage?.message?.viewOnceMessageV2?.message
+        || message?.ephemeralMessage?.message?.viewOnceMessage?.message
+        || message?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
+}
+
+function getViewOnceMedia(viewOnceMsg: any) {
+    return viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
+}
+
+function getViewOnceMimeType(viewOnceMsg: any) {
+    const media = getViewOnceMedia(viewOnceMsg)
+    if (media?.mimetype) return media.mimetype
+    return viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4'
+}
+
 
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
@@ -209,18 +228,9 @@ export async function startBot(): Promise<void> {
                     setViewOnceAlias(updateContextInfo.stanzaId, normalizedMsgId)
                 }
 
-                const viewOnceMsg = msgContent?.viewOnceMessageV2?.message
-                    || msgContent?.viewOnceMessage?.message
-                    || msgContent?.viewOnceMessageV2Extension?.message
-                    || msgContent?.ephemeralMessage?.message?.viewOnceMessageV2?.message
-                    || msgContent?.ephemeralMessage?.message?.viewOnceMessage?.message
-                    || msgContent?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
-                const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
+                const viewOnceMsg = extractViewOnceMessage(msgContent)
+                const viewOnceMedia = getViewOnceMedia(viewOnceMsg)
                 if (viewOnceMedia && !viewOnceCache.has(normalizedMsgId)) {
-                    const isGroup = jid.endsWith('@g.us')
-                    const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
-                    console.log(`[VIEW-ONCE-UPDATE] ${sender} view-once detected in update (id: ${normalizedMsgId})`)
-
                     try {
                         const fullMsg = { message: msgContent, key: msg.key }
                         const buffer = await downloadMediaMessage(
@@ -230,11 +240,11 @@ export async function startBot(): Promise<void> {
                         viewOnceCache.set(normalizedMsgId, {
                             buffer: buffer as Buffer,
                             timestamp: Date.now(),
-                            mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
+                            mimetype: getViewOnceMimeType(viewOnceMsg)
                         })
-                        console.log(`[CACHE] Cached from update: ${normalizedMsgId}`)
+                        console.log(`[CACHE] Cached: ${normalizedMsgId}`)
                     } catch (err: any) {
-                        console.error(`[CACHE] Failed from update ${normalizedMsgId}:`, err?.message)
+                        console.error(`[CACHE] Failed ${normalizedMsgId}:`, err?.message)
                     }
                 }
             }
@@ -254,19 +264,30 @@ export async function startBot(): Promise<void> {
                 setViewOnceAlias(contextInfo.stanzaId, normalizedMsgId)
             }
 
-            const viewOnceMsg = msg.message?.viewOnceMessageV2?.message
-                || msg.message?.viewOnceMessage?.message
-                || msg.message?.viewOnceMessageV2Extension?.message
-                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2?.message
-                || msg.message?.ephemeralMessage?.message?.viewOnceMessage?.message
-                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
-            const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
-            if (viewOnceMedia) {
-                const isGroup = jid.endsWith('@g.us')
-                const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
-                const mediaType = viewOnceMsg?.imageMessage ? 'image' : 'video'
-                console.log(`[VIEW-ONCE] ${sender} sent a view-once ${mediaType} message (id: ${normalizedMsgId}, type: ${type})`)
+            const msgKeys = msg.message ? Object.keys(msg.message) : []
+            const isEmptyMessageShell = msg.message && msgKeys.length === 0
+            if (isEmptyMessageShell && !viewOnceCache.has(normalizedMsgId)) {
+                try {
+                    const buffer = await downloadMediaMessage(
+                        msg, 'buffer', {},
+                        { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                    )
+                    if ((buffer as Buffer).byteLength > 0) {
+                        const shellViewOnceMsg = extractViewOnceMessage(msg.message)
+                        viewOnceCache.set(normalizedMsgId, {
+                            buffer: buffer as Buffer,
+                            timestamp: Date.now(),
+                            mimetype: getViewOnceMimeType(shellViewOnceMsg)
+                        })
+                        console.log(`[CACHE] Cached: ${normalizedMsgId}`)
+                    }
+                } catch {
+                }
+            }
 
+            const viewOnceMsg = extractViewOnceMessage(msg.message)
+            const viewOnceMedia = getViewOnceMedia(viewOnceMsg)
+            if (viewOnceMedia) {
                 if (!viewOnceCache.has(normalizedMsgId)) {
                     try {
                         const buffer = await downloadMediaMessage(
@@ -276,7 +297,7 @@ export async function startBot(): Promise<void> {
                         viewOnceCache.set(normalizedMsgId, {
                             buffer: buffer as Buffer,
                             timestamp: Date.now(),
-                            mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
+                            mimetype: getViewOnceMimeType(viewOnceMsg)
                         })
                         console.log(`[CACHE] Cached: ${normalizedMsgId}`)
                     } catch (err: any) {
@@ -373,7 +394,7 @@ export async function startBot(): Promise<void> {
 
                     // Try to extract view-once from quoted context (rarely available)
                     const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-                    const viewOnceMsg = quoteMsg?.viewOnceMessageV2?.message || quoteMsg?.viewOnceMessage?.message || quoteMsg?.viewOnceMessageV2Extension?.message
+                    const viewOnceMsg = extractViewOnceMessage(quoteMsg)
 
                     if (viewOnceMsg) {
                         isProcessing = true
