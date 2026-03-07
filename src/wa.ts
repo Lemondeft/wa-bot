@@ -54,7 +54,20 @@ function getViewOnceMedia(viewOnceMsg: any) {
 function getViewOnceMimeType(viewOnceMsg: any) {
     const media = getViewOnceMedia(viewOnceMsg)
     if (media?.mimetype) return media.mimetype
-    return viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4'
+    return viewOnceMsg?.imageMessage ? 'image/jpeg' : 'image/jpeg'
+}
+
+function inferMimeTypeFromBuffer(buffer: Buffer): string {
+    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
+    if (buffer.length >= 4 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png'
+    if (buffer.length >= 4 && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) return 'image/gif'
+    if (buffer.length >= 12) {
+        const riff = buffer.subarray(0, 4).toString('ascii')
+        const webp = buffer.subarray(8, 12).toString('ascii')
+        if (riff === 'RIFF' && webp === 'WEBP') return 'image/webp'
+    }
+    if (buffer.length >= 8 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') return 'video/mp4'
+    return 'image/jpeg'
 }
 
 
@@ -439,6 +452,10 @@ export async function startBot(): Promise<void> {
                                     revealedBuffer = buffer as Buffer
                                     if (messageCandidate && (messageCandidate as any)?.videoMessage) {
                                         revealedMimeType = (messageCandidate as any).videoMessage.mimetype || 'video/mp4'
+                                    } else if (messageCandidate && (messageCandidate as any)?.imageMessage) {
+                                        revealedMimeType = (messageCandidate as any).imageMessage.mimetype || 'image/jpeg'
+                                    } else {
+                                        revealedMimeType = inferMimeTypeFromBuffer(revealedBuffer)
                                     }
                                 }
                             } catch {
@@ -477,7 +494,8 @@ export async function startBot(): Promise<void> {
                 }
 
                 if (text.startsWith('!sticker')) {
-                    const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+                    const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+                    const quoteMsg = contextInfo?.quotedMessage
                     const imageMsg = quoteMsg?.imageMessage || msg.message?.imageMessage
 
                 if (!imageMsg) {
@@ -489,8 +507,16 @@ export async function startBot(): Promise<void> {
                 console.log(`[${tag}] ${sender} !sticker`)
 
                 try {
+                    const quotedKey = {
+                        remoteJid: contextInfo?.remoteJid || jid,
+                        id: contextInfo?.stanzaId,
+                        participant: contextInfo?.participant
+                    }
+                    const mediaSource = quoteMsg
+                        ? { message: quoteMsg, key: quotedKey.id ? quotedKey : msg.key }
+                        : msg
                     const buffer = await downloadMediaMessage(
-                        { message: quoteMsg, key: msg.key },
+                        mediaSource as any,
                         'buffer',
                         {},
                         { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
