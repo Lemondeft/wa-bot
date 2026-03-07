@@ -163,6 +163,50 @@ export async function startBot(): Promise<void> {
     sock.ev.process(async (events) => {
         if (!events['messages.upsert']) return
         const { messages, type } = events['messages.upsert']
+
+        for (const msg of messages) {
+            const jid = msg.key?.remoteJid
+            const msgId = msg.key?.id
+            if (!jid || !msgId) continue
+
+            const msgKeys = msg.message ? Object.keys(msg.message) : []
+            if (type !== 'notify') {
+                console.log(`[DEBUG-UPSERT] type: ${type}, id: ${msgId}, from: ${jid}, keys: ${JSON.stringify(msgKeys)}`)
+            }
+
+            const viewOnceMsg = msg.message?.viewOnceMessageV2?.message
+                || msg.message?.viewOnceMessage?.message
+                || msg.message?.viewOnceMessageV2Extension?.message
+                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2?.message
+                || msg.message?.ephemeralMessage?.message?.viewOnceMessage?.message
+                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
+            const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
+            if (viewOnceMedia) {
+                const isGroup = jid.endsWith('@g.us')
+                const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
+                const tag = isGroup ? 'GROUP' : 'DM'
+                const mediaType = viewOnceMsg?.imageMessage ? 'image' : 'video'
+                console.log(`[VIEW-ONCE] ${sender} sent a view-once ${mediaType} message (id: ${msgId}, type: ${type})`)
+
+                if (!viewOnceCache.has(msgId)) {
+                    try {
+                        const buffer = await downloadMediaMessage(
+                            msg, 'buffer', {},
+                            { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                        )
+                        viewOnceCache.set(msgId, {
+                            buffer: buffer as Buffer,
+                            timestamp: Date.now(),
+                            mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
+                        })
+                        console.log(`[CACHE] Cached: ${msgId}`)
+                    } catch (err: any) {
+                        console.error(`[CACHE] Failed ${msgId}:`, err?.message)
+                    }
+                }
+            }
+        }
+
         if (type !== 'notify') return
 
         for (const msg of messages) {
@@ -178,37 +222,6 @@ export async function startBot(): Promise<void> {
             // Debug: log ALL incoming message structure
             const msgKeys = msg.message ? Object.keys(msg.message) : []
             console.log(`[DEBUG-MSG] id: ${msgId}, from: ${jid}, keys: ${JSON.stringify(msgKeys)}`)
-
-            const viewOnceMsg = msg.message?.viewOnceMessageV2?.message
-                || msg.message?.viewOnceMessage?.message
-                || msg.message?.viewOnceMessageV2Extension?.message
-                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2?.message
-                || msg.message?.ephemeralMessage?.message?.viewOnceMessage?.message
-                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
-            const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
-            if (viewOnceMedia) {
-                const isGroup = jid.endsWith('@g.us')
-                const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
-                const tag = isGroup ? 'GROUP' : 'DM'
-                const mediaType = viewOnceMsg?.imageMessage ? 'image' : 'video'
-                console.log(`[VIEW-ONCE] ${sender} sent a view-once ${mediaType} message (id: ${msgId})`)
-
-                try {
-                    const buffer = await downloadMediaMessage(
-                        msg, 'buffer', {},
-                        { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
-                    )
-                    viewOnceCache.set(
-                        msgId, {
-                        buffer: buffer as Buffer,
-                        timestamp: Date.now(),
-                        mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
-                    })
-                    console.log(`[CACHE] Cached: ${msgId}`)
-                } catch (err: any) {
-                    console.error(`[CACHE] Failed ${msgId}:`, err?.message)
-                }
-            }
 
             try {
                 const text = (
