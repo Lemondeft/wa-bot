@@ -193,6 +193,14 @@ export async function startBot(): Promise<void> {
                         timestamp: Date.now(),
                         mimetype: viewOnceMsg.imageMessage.mimetype || 'image/jpeg'
                     })
+                    const stanzaId = msg.key?.id
+                    if (stanzaId && stanzaId !== msgId) {
+                        viewOnceCache.set(stanzaId, {
+                            buffer: buffer as Buffer,
+                            timestamp: Date.now(),
+                            mimetype: viewOnceMsg.imageMessage.mimetype || 'image/jpeg'
+                        })
+                    }
                     console.log(`[CACHE] Cached: ${msgId}`)
                 } catch (err: any) {
                     console.error(`[CACHE] Failed ${msgId}:`, err?.message)
@@ -265,23 +273,29 @@ export async function startBot(): Promise<void> {
                         continue
                     }
 
-                    const cached = viewOnceCache.get(quotedId)
+                    let cached = viewOnceCache.get(quotedId)
+
                     if (!cached) {
-                        await sock.sendMessage(jid, {
-                            text: 'View-once not found in cache (expired or sent before bot started)'
-                        }, { quoted: msg })
+                        isProcessing = true
+                        try {
+                            const buffer = await downloadMediaMessage(
+                                { message: quoteMsg, key: msg.key },
+                                'buffer',
+                                {},
+                                { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                            )
+                            await sock.sendMessage(jid, { image: buffer as Buffer, caption: 'Revealed' }, { quoted: msg })
+                            console.log(`[${tag}] ${sender} revealed (downloaded)`)
+                        } catch (err: any) {
+                            console.error(`[${tag}] Failed to reveal:`, err?.message)
+                            await sock.sendMessage(jid, { text: 'Failed to reveal. The view-once may have already been opened.' }, { quoted: msg })
+                        }
+                        isProcessing = false
                         continue
                     }
 
-                    isProcessing = true
-                    try {
-                        await sock.sendMessage(jid, { image: cached.buffer, caption: 'Revealed view-once message' }, { quoted: msg })
-                        console.log(`[${tag}] ${sender} revealed a view-once message`)
-                    } catch (err: any) {
-                        console.error(`[${tag}] Failed to reveal view-once message ${quotedId}:`, err?.message)
-                        await sock.sendMessage(jid, { text: 'Failed to reveal view-once message: ' + err?.message }, { quoted: msg })
-                    }
-                    isProcessing = false
+                    await sock.sendMessage(jid, { image: cached.buffer, caption: 'Revealed' }, { quoted: msg })
+                    console.log(`[${tag}] ${sender} revealed (cached)`)
                     continue
                 }
 
@@ -289,114 +303,112 @@ export async function startBot(): Promise<void> {
                     const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
                     const imageMsg = quoteMsg?.imageMessage || msg.message?.imageMessage
 
-                    if (!imageMsg) {
-                        await sock.sendMessage(jid, { text: 'Please send an image with a caption "!sticker" or reply to an image with "!sticker"' }, { quoted: msg })
-                        continue
-                    }
-
-                    isProcessing = true
-                    console.log(`[${tag}] ${sender} !sticker`)
-
-                    try {
-                        const buffer = await downloadMediaMessage(
-                            quoteMsg ? { message: quoteMsg, key: msg.key } : msg, 'buffer',
-                            {},
-                            {
-                                logger: silentLogger,
-                                reuploadRequest: sock.updateMediaMessage
-                            }
-                        )
-
-                        const webpBuffer = await sharp(buffer as Buffer)
-                            .resize(512, 512, {
-                                fit: 'contain',
-                                background: { r: 0, g: 0, b: 0, alpha: 0 }
-                            })
-                            .webp({ quality: 80 })
-                            .toBuffer()
-
-                        await sock.sendMessage(jid, { sticker: webpBuffer }, { quoted: msg })
-                        console.log(`[${tag}] ${sender} sticker sent`)
-                    } catch (err: any) {
-                        console.error(`[${tag}] Sticker creation failed:`, err?.message)
-                        await sock.sendMessage(jid, { text: 'Failed to create sticker: ' + err?.message }, { quoted: msg })
-                    }
-                    isProcessing = false
+                if (!imageMsg) {
+                    await sock.sendMessage(jid, { text: 'Please send an image with a caption "!sticker" or reply to an image with "!sticker"' }, { quoted: msg })
                     continue
                 }
 
-                if (text.startsWith('!ai')) {
-                    const prompt = text.slice(4).trim()
-                    if (!prompt && !imageBase64) continue
+                isProcessing = true
+                console.log(`[${tag}] ${sender} !sticker`)
 
-                    isProcessing = true
-                    console.log(`[${tag}] ${sender} ${prompt}`)
+                try {
+                    const buffer = await downloadMediaMessage(
+                        { message: quoteMsg, key: msg.key },
+                        'buffer',
+                        {},
+                        { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                    )
 
-                    const userContent = imageBase64
-                        ? [
-                            ...(prompt ? [{ type: 'text', text: prompt }] : []),
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
-                        ]
-                        : prompt
+                    const webpBuffer = await sharp(buffer as Buffer)
+                        .resize(512, 512, {
+                            fit: 'contain',
+                            background: { r: 0, g: 0, b: 0, alpha: 0 }
+                        })
+                        .webp({ quality: 80 })
+                        .toBuffer()
 
-                    const history = appendHistory(jid, 'user', userContent)
-                    const reply = await chat(history)
-                    appendHistory(jid, 'assistant', reply)
-
-                    console.log(`[${tag}] BOT ${reply.slice(0, 50)}...`)
-
-                    try {
-                        await sendWithTypingAndQuote(sock, jid, reply, msg)
-                    } catch (err: any) {
-                        console.error('[SEND ERROR]', err?.message)
-                    }
-                    isProcessing = false
-                    continue
+                    await sock.sendMessage(jid, { sticker: webpBuffer }, { quoted: msg })
+                    console.log(`[${tag}] ${sender} sticker sent`)
+                } catch (err: any) {
+                    console.error(`[${tag}] Sticker creation failed:`, err?.message)
+                    await sock.sendMessage(jid, { text: 'Failed to create sticker: ' + err?.message }, { quoted: msg })
                 }
-
-                if (text.startsWith('!img')) {
-                    const prompt = text.slice(5).trim()
-                    if (!prompt) {
-                        await sock.sendMessage(jid, { text: 'usage: !img <description>' }, { quoted: msg })
-                        continue
-                    }
-
-                    isProcessing = true
-                    console.log(`[${tag}] ${sender} !img ${prompt}`)
-                    await sock.sendMessage(jid, { text: 'generating image...' }, { quoted: msg })
-
-                    const result = await generateImage(prompt)
-                    if (!result || result === 'RATE_LIMITED') {
-                        const msg_text = result === 'RATE_LIMITED' ? 'rate limited, try again later' : 'failed to generate image'
-                        await sock.sendMessage(jid, { text: msg_text }, { quoted: msg })
-                        isProcessing = false
-                        continue
-                    }
-
-                    try {
-                        let imgBuffer: Buffer
-                        if (result.url.startsWith('data:image')) {
-                            const base64Data = result.url.split(',')[1]
-                            if (!base64Data) throw new Error('Invalid base64 format')
-                            imgBuffer = Buffer.from(base64Data, 'base64')
-                        } else {
-                            const response = await fetch(result.url)
-                            if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
-                            imgBuffer = Buffer.from(await response.arrayBuffer())
-                        }
-
-                        await sock.sendMessage(jid, { image: imgBuffer, caption: result.caption || prompt }, { quoted: msg })
-                    } catch (err: any) {
-                        console.error(`[${tag}] Image send failed:`, err?.message)
-                        await sock.sendMessage(jid, { text: 'failed to send image: ' + err?.message }, { quoted: msg })
-                    }
-                    isProcessing = false
-                    continue
-                }
-
-            } catch (err: any) {
-                console.error('[MESSAGE HANDLER ERROR]', err?.message)
+                isProcessing = false
+                continue
             }
+
+            if (text.startsWith('!ai')) {
+                const prompt = text.slice(4).trim()
+                if (!prompt && !imageBase64) continue
+
+                isProcessing = true
+                console.log(`[${tag}] ${sender} ${prompt}`)
+
+                const userContent = imageBase64
+                    ? [
+                        ...(prompt ? [{ type: 'text', text: prompt }] : []),
+                        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+                    ]
+                    : prompt
+
+                const history = appendHistory(jid, 'user', userContent)
+                const reply = await chat(history)
+                appendHistory(jid, 'assistant', reply)
+
+                console.log(`[${tag}] BOT ${reply.slice(0, 50)}...`)
+
+                try {
+                    await sendWithTypingAndQuote(sock, jid, reply, msg)
+                } catch (err: any) {
+                    console.error('[SEND ERROR]', err?.message)
+                }
+                isProcessing = false
+                continue
+            }
+
+            if (text.startsWith('!img')) {
+                const prompt = text.slice(5).trim()
+                if (!prompt) {
+                    await sock.sendMessage(jid, { text: 'usage: !img <description>' }, { quoted: msg })
+                    continue
+                }
+
+                isProcessing = true
+                console.log(`[${tag}] ${sender} !img ${prompt}`)
+                await sock.sendMessage(jid, { text: 'generating image...' }, { quoted: msg })
+
+                const result = await generateImage(prompt)
+                if (!result || result === 'RATE_LIMITED') {
+                    const msg_text = result === 'RATE_LIMITED' ? 'rate limited, try again later' : 'failed to generate image'
+                    await sock.sendMessage(jid, { text: msg_text }, { quoted: msg })
+                    isProcessing = false
+                    continue
+                }
+
+                try {
+                    let imgBuffer: Buffer
+                    if (result.url.startsWith('data:image')) {
+                        const base64Data = result.url.split(',')[1]
+                        if (!base64Data) throw new Error('Invalid base64 format')
+                        imgBuffer = Buffer.from(base64Data, 'base64')
+                    } else {
+                        const response = await fetch(result.url)
+                        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+                        imgBuffer = Buffer.from(await response.arrayBuffer())
+                    }
+
+                    await sock.sendMessage(jid, { image: imgBuffer, caption: result.caption || prompt }, { quoted: msg })
+                } catch (err: any) {
+                    console.error(`[${tag}] Image send failed:`, err?.message)
+                    await sock.sendMessage(jid, { text: 'failed to send image: ' + err?.message }, { quoted: msg })
+                }
+                isProcessing = false
+                continue
+            }
+
+        } catch (err: any) {
+            console.error('[MESSAGE HANDLER ERROR]', err?.message)
         }
+    }
     })
 }
