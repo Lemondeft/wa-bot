@@ -9,7 +9,34 @@ const RECONNECT_DELAY = 3000
 const HEALTH_CHECK_INTERVAL = 300000
 const INACTIVE_THRESHOLD = 5
 const viewOnceCache = new Map<string, { buffer: Buffer, timestamp: number, mimetype: string }>()
+const viewOnceAliasCache = new Map<string, { targetId: string, timestamp: number }>()
 const VIEWONCE_CACHE_TTL = 3600000
+
+
+function normalizeMsgId(id?: string | null): string {
+    return (id || '').toUpperCase()
+}
+
+function setViewOnceAlias(sourceId?: string | null, targetId?: string | null) {
+    const source = normalizeMsgId(sourceId)
+    const target = normalizeMsgId(targetId)
+    if (!source || !target || source === target) return
+    viewOnceAliasCache.set(source, { targetId: target, timestamp: Date.now() })
+}
+
+function resolveViewOnceId(id: string): string {
+    let current = normalizeMsgId(id)
+    const visited = new Set<string>()
+
+    while (current && !visited.has(current)) {
+        visited.add(current)
+        const alias = viewOnceAliasCache.get(current)
+        if (!alias) break
+        current = alias.targetId
+    }
+
+    return current
+}
 
 
 
@@ -158,6 +185,11 @@ export async function startBot(): Promise<void> {
                 viewOnceCache.delete(msgId)
             }
         }
+        for (const [sourceId, alias] of viewOnceAliasCache.entries()) {
+            if (now - alias.timestamp > VIEWONCE_CACHE_TTL) {
+                viewOnceAliasCache.delete(sourceId)
+            }
+        }
     }, 600000)
 
     sock.ev.process(async (events) => {
@@ -167,13 +199,14 @@ export async function startBot(): Promise<void> {
                 const jid = msg.key?.remoteJid
                 const msgId = msg.key?.id
                 if (!jid || !msgId) continue
+                const normalizedMsgId = normalizeMsgId(msgId)
 
                 const msgContent = msg.update?.message || msg.message
                 if (!msgContent) continue
 
-                const msgKeys = Object.keys(msgContent)
-                if (msgKeys.length > 0) {
-                    console.log(`[DEBUG-UPDATE] id: ${msgId}, keys: ${JSON.stringify(msgKeys)}`)
+                const updateContextInfo = msgContent?.extendedTextMessage?.contextInfo
+                if (updateContextInfo?.stanzaId) {
+                    setViewOnceAlias(updateContextInfo.stanzaId, normalizedMsgId)
                 }
 
                 const viewOnceMsg = msgContent?.viewOnceMessageV2?.message
@@ -183,10 +216,10 @@ export async function startBot(): Promise<void> {
                     || msgContent?.ephemeralMessage?.message?.viewOnceMessage?.message
                     || msgContent?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
                 const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
-                if (viewOnceMedia && !viewOnceCache.has(msgId)) {
+                if (viewOnceMedia && !viewOnceCache.has(normalizedMsgId)) {
                     const isGroup = jid.endsWith('@g.us')
                     const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
-                    console.log(`[VIEW-ONCE-UPDATE] ${sender} view-once detected in update (id: ${msgId})`)
+                    console.log(`[VIEW-ONCE-UPDATE] ${sender} view-once detected in update (id: ${normalizedMsgId})`)
 
                     try {
                         const fullMsg = { message: msgContent, key: msg.key }
@@ -194,14 +227,14 @@ export async function startBot(): Promise<void> {
                             fullMsg as any, 'buffer', {},
                             { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
                         )
-                        viewOnceCache.set(msgId, {
+                        viewOnceCache.set(normalizedMsgId, {
                             buffer: buffer as Buffer,
                             timestamp: Date.now(),
                             mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
                         })
-                        console.log(`[CACHE] Cached from update: ${msgId}`)
+                        console.log(`[CACHE] Cached from update: ${normalizedMsgId}`)
                     } catch (err: any) {
-                        console.error(`[CACHE] Failed from update ${msgId}:`, err?.message)
+                        console.error(`[CACHE] Failed from update ${normalizedMsgId}:`, err?.message)
                     }
                 }
             }
@@ -214,10 +247,11 @@ export async function startBot(): Promise<void> {
             const jid = msg.key?.remoteJid
             const msgId = msg.key?.id
             if (!jid || !msgId) continue
+            const normalizedMsgId = normalizeMsgId(msgId)
 
-            const msgKeys = msg.message ? Object.keys(msg.message) : []
-            if (type !== 'notify') {
-                console.log(`[DEBUG-UPSERT] type: ${type}, id: ${msgId}, from: ${jid}, keys: ${JSON.stringify(msgKeys)}`)
+            const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+            if (contextInfo?.stanzaId) {
+                setViewOnceAlias(contextInfo.stanzaId, normalizedMsgId)
             }
 
             const viewOnceMsg = msg.message?.viewOnceMessageV2?.message
@@ -230,24 +264,23 @@ export async function startBot(): Promise<void> {
             if (viewOnceMedia) {
                 const isGroup = jid.endsWith('@g.us')
                 const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
-                const tag = isGroup ? 'GROUP' : 'DM'
                 const mediaType = viewOnceMsg?.imageMessage ? 'image' : 'video'
-                console.log(`[VIEW-ONCE] ${sender} sent a view-once ${mediaType} message (id: ${msgId}, type: ${type})`)
+                console.log(`[VIEW-ONCE] ${sender} sent a view-once ${mediaType} message (id: ${normalizedMsgId}, type: ${type})`)
 
-                if (!viewOnceCache.has(msgId)) {
+                if (!viewOnceCache.has(normalizedMsgId)) {
                     try {
                         const buffer = await downloadMediaMessage(
                             msg, 'buffer', {},
                             { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
                         )
-                        viewOnceCache.set(msgId, {
+                        viewOnceCache.set(normalizedMsgId, {
                             buffer: buffer as Buffer,
                             timestamp: Date.now(),
                             mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
                         })
-                        console.log(`[CACHE] Cached: ${msgId}`)
+                        console.log(`[CACHE] Cached: ${normalizedMsgId}`)
                     } catch (err: any) {
-                        console.error(`[CACHE] Failed ${msgId}:`, err?.message)
+                        console.error(`[CACHE] Failed ${normalizedMsgId}:`, err?.message)
                     }
                 }
             }
@@ -264,10 +297,6 @@ export async function startBot(): Promise<void> {
             setTimeout(() => seen.delete(msgId), 60000)
 
             lastActivity = Date.now()
-
-            // Debug: log ALL incoming message structure
-            const msgKeys = msg.message ? Object.keys(msg.message) : []
-            console.log(`[DEBUG-MSG] id: ${msgId}, from: ${jid}, keys: ${JSON.stringify(msgKeys)}`)
 
             try {
                 const text = (
@@ -322,14 +351,15 @@ export async function startBot(): Promise<void> {
 
                 if (text.startsWith('!reveal')) {
                     const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId
-                    console.log(`[REVEAL] Looking for quotedId: ${quotedId}, cache keys: [${[...viewOnceCache.keys()].join(', ')}]`)
 
                     if (!quotedId) {
                         await sock.sendMessage(jid, { text: 'Please reply to a view-once message with "!reveal"' }, { quoted: msg })
                         continue
                     }
 
-                    const cached = viewOnceCache.get(quotedId)
+                    const normalizedQuotedId = normalizeMsgId(quotedId)
+                    const resolvedQuotedId = resolveViewOnceId(normalizedQuotedId)
+                    const cached = viewOnceCache.get(normalizedQuotedId) || viewOnceCache.get(resolvedQuotedId)
 
                     if (cached) {
                         const isVideo = cached.mimetype.startsWith('video')
@@ -337,7 +367,7 @@ export async function startBot(): Promise<void> {
                             ? { video: cached.buffer, caption: 'Revealed' }
                             : { image: cached.buffer, caption: 'Revealed' }
                         await sock.sendMessage(jid, media, { quoted: msg })
-                        console.log(`[${tag}] ${sender} revealed (cached, ${cached.mimetype})`)
+                        console.log(`[${tag}] ${sender} revealed (cached: ${normalizedQuotedId} -> ${resolvedQuotedId}, ${cached.mimetype})`)
                         continue
                     }
 
