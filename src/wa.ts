@@ -161,6 +161,52 @@ export async function startBot(): Promise<void> {
     }, 600000)
 
     sock.ev.process(async (events) => {
+        if (events['messages.update']) {
+            for (const update of events['messages.update']) {
+                const msg = update as any
+                const jid = msg.key?.remoteJid
+                const msgId = msg.key?.id
+                if (!jid || !msgId) continue
+
+                const msgContent = msg.update?.message || msg.message
+                if (!msgContent) continue
+
+                const msgKeys = Object.keys(msgContent)
+                if (msgKeys.length > 0) {
+                    console.log(`[DEBUG-UPDATE] id: ${msgId}, keys: ${JSON.stringify(msgKeys)}`)
+                }
+
+                const viewOnceMsg = msgContent?.viewOnceMessageV2?.message
+                    || msgContent?.viewOnceMessage?.message
+                    || msgContent?.viewOnceMessageV2Extension?.message
+                    || msgContent?.ephemeralMessage?.message?.viewOnceMessageV2?.message
+                    || msgContent?.ephemeralMessage?.message?.viewOnceMessage?.message
+                    || msgContent?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
+                const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
+                if (viewOnceMedia && !viewOnceCache.has(msgId)) {
+                    const isGroup = jid.endsWith('@g.us')
+                    const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
+                    console.log(`[VIEW-ONCE-UPDATE] ${sender} view-once detected in update (id: ${msgId})`)
+
+                    try {
+                        const fullMsg = { message: msgContent, key: msg.key }
+                        const buffer = await downloadMediaMessage(
+                            fullMsg as any, 'buffer', {},
+                            { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                        )
+                        viewOnceCache.set(msgId, {
+                            buffer: buffer as Buffer,
+                            timestamp: Date.now(),
+                            mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
+                        })
+                        console.log(`[CACHE] Cached from update: ${msgId}`)
+                    } catch (err: any) {
+                        console.error(`[CACHE] Failed from update ${msgId}:`, err?.message)
+                    }
+                }
+            }
+        }
+
         if (!events['messages.upsert']) return
         const { messages, type } = events['messages.upsert']
 
