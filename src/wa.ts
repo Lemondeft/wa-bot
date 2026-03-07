@@ -8,6 +8,10 @@ import sharp from 'sharp'
 const RECONNECT_DELAY = 3000
 const HEALTH_CHECK_INTERVAL = 300000
 const INACTIVE_THRESHOLD = 5
+const viewOnceCache = new Map<string, { buffer: Buffer, timestamp: number, mimetype: string }>()
+const VIEWONCE_CACHE_TTL = 3600000
+
+
 
 function splitIntoChunks(text: string, maxSize = 150): string[] {
     const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]
@@ -147,6 +151,15 @@ export async function startBot(): Promise<void> {
         }
     }, HEALTH_CHECK_INTERVAL)
 
+    setInterval(() => {
+        const now = Date.now()
+        for (const [msgId, data] of viewOnceCache.entries()) {
+            if (now - data.timestamp > VIEWONCE_CACHE_TTL) {
+                viewOnceCache.delete(msgId)
+            }
+        }
+    }, 600000)
+
     sock.ev.process(async (events) => {
         if (!events['messages.upsert']) return
         const { messages, type } = events['messages.upsert']
@@ -161,6 +174,30 @@ export async function startBot(): Promise<void> {
             setTimeout(() => seen.delete(msgId), 60000)
 
             lastActivity = Date.now()
+
+            const viewOnceMsg = msg.message?.viewOnceMessageV2?.message || msg.message?.viewOnceMessage?.message
+            if (viewOnceMsg?.imageMessage) {
+                const isGroup = jid.endsWith('@g.us')
+                const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
+                const tag = isGroup ? 'GROUP' : 'DM'
+                console.log(`[VIEW-ONCE] ${sender} sent a view-once image message`)
+
+                try {
+                    const buffer = await downloadMediaMessage(
+                        msg, 'buffer', {},
+                        { logger: silentLogger, reuploadRequest: sock.updateMediaMessage }
+                    )
+                    viewOnceCache.set(
+                        msgId, {
+                        buffer: buffer as Buffer,
+                        timestamp: Date.now(),
+                        mimetype: viewOnceMsg.imageMessage.mimetype || 'image/jpeg'
+                    })
+                    console.log(`[CACHE] Cached: ${msgId}`)
+                } catch (err: any) {
+                    console.error(`[CACHE] Failed ${msgId}:`, err?.message)
+                }
+            }
 
             try {
                 const text = (
@@ -189,7 +226,7 @@ export async function startBot(): Promise<void> {
 
                 if (!text) continue
                 if (msg.message?.pollCreationMessage || msg.message?.pollUpdateMessage) continue
-                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && text !== '!clear' && !text.startsWith('!status')) continue
+                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && text !== '!clear' && !text.startsWith('!status')) continue
 
                 const userId = msg.key.participant || jid
                 const now = Date.now()
@@ -210,6 +247,41 @@ export async function startBot(): Promise<void> {
                     clearHistory(jid)
                     console.log(`[${tag}] ${sender} !clear`)
                     await sock.sendMessage(jid, { text: 'Chat history cleared' }, { quoted: msg })
+                    continue
+                }
+
+                if (text.startsWith('!reveal')) {
+                    const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+                    const viewOnceMsg = quoteMsg?.viewOnceMessageV2?.message || quoteMsg?.viewOnceMessage?.message
+                    const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId
+
+                    if (!viewOnceMsg) {
+                        await sock.sendMessage(jid, { text: 'Please reply to a view-once message with "!reveal"' }, { quoted: msg })
+                        continue
+                    }
+
+                    if (!quotedId) {
+                        await sock.sendMessage(jid, { text: 'Quoted message ID not found' }, { quoted: msg })
+                        continue
+                    }
+
+                    const cached = viewOnceCache.get(quotedId)
+                    if (!cached) {
+                        await sock.sendMessage(jid, {
+                            text: 'View-once not found in cache (expired or sent before bot started)'
+                        }, { quoted: msg })
+                        continue
+                    }
+
+                    isProcessing = true
+                    try {
+                        await sock.sendMessage(jid, { image: cached.buffer, caption: 'Revealed view-once message' }, { quoted: msg })
+                        console.log(`[${tag}] ${sender} revealed a view-once message`)
+                    } catch (err: any) {
+                        console.error(`[${tag}] Failed to reveal view-once message ${quotedId}:`, err?.message)
+                        await sock.sendMessage(jid, { text: 'Failed to reveal view-once message: ' + err?.message }, { quoted: msg })
+                    }
+                    isProcessing = false
                     continue
                 }
 
@@ -236,11 +308,13 @@ export async function startBot(): Promise<void> {
                         )
 
                         const webpBuffer = await sharp(buffer as Buffer)
-                        .resize(512, 512, { fit: 'contain',
-                            background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                        .webp({ quality: 80 })
-                        .toBuffer()
-                        
+                            .resize(512, 512, {
+                                fit: 'contain',
+                                background: { r: 0, g: 0, b: 0, alpha: 0 }
+                            })
+                            .webp({ quality: 80 })
+                            .toBuffer()
+
                         await sock.sendMessage(jid, { sticker: webpBuffer }, { quoted: msg })
                         console.log(`[${tag}] ${sender} sticker sent`)
                     } catch (err: any) {
