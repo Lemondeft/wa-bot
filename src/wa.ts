@@ -259,23 +259,26 @@ export async function startBot(): Promise<void> {
                 }
 
                 if (text.startsWith('!reveal')) {
-                    const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-                    const viewOnceMsg = quoteMsg?.viewOnceMessageV2?.message || quoteMsg?.viewOnceMessage?.message
                     const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId
 
-                    if (!viewOnceMsg) {
+                    if (!quotedId) {
                         await sock.sendMessage(jid, { text: 'Please reply to a view-once message with "!reveal"' }, { quoted: msg })
                         continue
                     }
 
-                    if (!quotedId) {
-                        await sock.sendMessage(jid, { text: 'Quoted message ID not found' }, { quoted: msg })
+                    const cached = viewOnceCache.get(quotedId)
+
+                    if (cached) {
+                        await sock.sendMessage(jid, { image: cached.buffer, caption: 'Revealed' }, { quoted: msg })
+                        console.log(`[${tag}] ${sender} revealed (cached)`)
                         continue
                     }
 
-                    let cached = viewOnceCache.get(quotedId)
+                    // Try to extract view-once from quoted context (rarely available)
+                    const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+                    const viewOnceMsg = quoteMsg?.viewOnceMessageV2?.message || quoteMsg?.viewOnceMessage?.message
 
-                    if (!cached) {
+                    if (viewOnceMsg) {
                         isProcessing = true
                         try {
                             const quotedKey = {
@@ -299,8 +302,7 @@ export async function startBot(): Promise<void> {
                         continue
                     }
 
-                    await sock.sendMessage(jid, { image: cached.buffer, caption: 'Revealed' }, { quoted: msg })
-                    console.log(`[${tag}] ${sender} revealed (cached)`)
+                    await sock.sendMessage(jid, { text: 'View-once not found in cache. The bot must be online when the view-once is sent to cache it.' }, { quoted: msg })
                     continue
                 }
 
