@@ -175,12 +175,19 @@ export async function startBot(): Promise<void> {
 
             lastActivity = Date.now()
 
-            const viewOnceMsg = msg.message?.viewOnceMessageV2?.message || msg.message?.viewOnceMessage?.message
-            if (viewOnceMsg?.imageMessage) {
+            const viewOnceMsg = msg.message?.viewOnceMessageV2?.message
+                || msg.message?.viewOnceMessage?.message
+                || msg.message?.viewOnceMessageV2Extension?.message
+                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2?.message
+                || msg.message?.ephemeralMessage?.message?.viewOnceMessage?.message
+                || msg.message?.ephemeralMessage?.message?.viewOnceMessageV2Extension?.message
+            const viewOnceMedia = viewOnceMsg?.imageMessage || viewOnceMsg?.videoMessage
+            if (viewOnceMedia) {
                 const isGroup = jid.endsWith('@g.us')
                 const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
                 const tag = isGroup ? 'GROUP' : 'DM'
-                console.log(`[VIEW-ONCE] ${sender} sent a view-once image message`)
+                const mediaType = viewOnceMsg?.imageMessage ? 'image' : 'video'
+                console.log(`[VIEW-ONCE] ${sender} sent a view-once ${mediaType} message (id: ${msgId})`)
 
                 try {
                     const buffer = await downloadMediaMessage(
@@ -191,16 +198,8 @@ export async function startBot(): Promise<void> {
                         msgId, {
                         buffer: buffer as Buffer,
                         timestamp: Date.now(),
-                        mimetype: viewOnceMsg.imageMessage.mimetype || 'image/jpeg'
+                        mimetype: viewOnceMedia.mimetype || (viewOnceMsg?.imageMessage ? 'image/jpeg' : 'video/mp4')
                     })
-                    const stanzaId = msg.key?.id
-                    if (stanzaId && stanzaId !== msgId) {
-                        viewOnceCache.set(stanzaId, {
-                            buffer: buffer as Buffer,
-                            timestamp: Date.now(),
-                            mimetype: viewOnceMsg.imageMessage.mimetype || 'image/jpeg'
-                        })
-                    }
                     console.log(`[CACHE] Cached: ${msgId}`)
                 } catch (err: any) {
                     console.error(`[CACHE] Failed ${msgId}:`, err?.message)
@@ -269,14 +268,18 @@ export async function startBot(): Promise<void> {
                     const cached = viewOnceCache.get(quotedId)
 
                     if (cached) {
-                        await sock.sendMessage(jid, { image: cached.buffer, caption: 'Revealed' }, { quoted: msg })
-                        console.log(`[${tag}] ${sender} revealed (cached)`)
+                        const isVideo = cached.mimetype.startsWith('video')
+                        const media = isVideo
+                            ? { video: cached.buffer, caption: 'Revealed' }
+                            : { image: cached.buffer, caption: 'Revealed' }
+                        await sock.sendMessage(jid, media, { quoted: msg })
+                        console.log(`[${tag}] ${sender} revealed (cached, ${cached.mimetype})`)
                         continue
                     }
 
                     // Try to extract view-once from quoted context (rarely available)
                     const quoteMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-                    const viewOnceMsg = quoteMsg?.viewOnceMessageV2?.message || quoteMsg?.viewOnceMessage?.message
+                    const viewOnceMsg = quoteMsg?.viewOnceMessageV2?.message || quoteMsg?.viewOnceMessage?.message || quoteMsg?.viewOnceMessageV2Extension?.message
 
                     if (viewOnceMsg) {
                         isProcessing = true
