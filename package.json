@@ -5,6 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx src/index.ts",
     "dev:trace": "node --trace-warnings --loader tsx src/index.ts",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^25.3.1",
     "@types/qrcode-terminal": "^0.12.2",
+    "patch-package": "^8.0.1",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
