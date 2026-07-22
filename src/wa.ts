@@ -172,7 +172,8 @@ export async function startBot(): Promise<void> {
         printQRInTerminal: false,
         getMessage: async () => proto.Message.create({ conversation: '' }),
         connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000
+        keepAliveIntervalMs: 30000,
+        syncFullHistory: false
     })
 
     sock.ev.on('creds.update', saveCreds)
