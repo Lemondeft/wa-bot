@@ -1,7 +1,7 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, proto, downloadMediaMessage } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode-terminal'
-import { appendHistory, clearHistory } from './history.ts'
-import { chat } from './ai.ts'
+import { appendHistory, clearHistory, loadHistory } from './history.ts'
+import { chat, summarize } from './ai.ts'
 import { generateImage } from './image.ts'
 import sharp from 'sharp'
 
@@ -366,7 +366,12 @@ export async function startBot(): Promise<void> {
 
                 if (!text) continue
                 if (msg.message?.pollCreationMessage || msg.message?.pollUpdateMessage) continue
-                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && text !== '!clear' && !text.startsWith('!status')) continue
+
+                if (!(text.startsWith('!ai') && imageBase64)) {
+                    appendHistory(jid, 'user', text)
+                }
+
+                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && !text.startsWith('!summarize') && text !== '!clear' && !text.startsWith('!status')) continue
 
                 const userId = msg.key.participant || jid
                 const now = Date.now()
@@ -387,6 +392,25 @@ export async function startBot(): Promise<void> {
                     clearHistory(jid)
                     console.log(`[${tag}] ${sender} !clear`)
                     await sock.sendMessage(jid, { text: 'Chat history cleared' }, { quoted: msg })
+                    continue
+                }
+
+                if (text.startsWith('!summarize')) {
+                    const extraContext = text.slice('!summarize'.length).trim()
+                    const history = loadHistory(jid)
+                    if (history.length === 0) {
+                        await sock.sendMessage(jid, { text: 'No chat history to summarize yet' }, { quoted: msg })
+                        continue
+                    }
+                    isProcessing = true
+                    console.log(`[${tag}] ${sender} !summarize`)
+                    const summary = await summarize(history, extraContext)
+                    try {
+                        await sendWithTypingAndQuote(sock, jid, summary, msg)
+                    } catch (err: any) {
+                        console.error('[SEND ERROR]', err?.message)
+                    }
+                    isProcessing = false
                     continue
                 }
 
@@ -545,7 +569,9 @@ export async function startBot(): Promise<void> {
                     ]
                     : prompt
 
-                const history = appendHistory(jid, 'user', userContent)
+                const history = imageBase64
+                    ? appendHistory(jid, 'user', userContent)
+                    : loadHistory(jid)
                 const reply = await chat(history)
                 appendHistory(jid, 'assistant', reply)
 
