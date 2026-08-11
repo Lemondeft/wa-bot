@@ -1,13 +1,14 @@
 # WhatsApp AI Bot
 
-A personal WhatsApp bot powered by with per-chat conversation history.
+A personal WhatsApp bot powered by AI with per-chat conversation history. Listens to and records every message for context, but only replies on command.
 
 ## Features
 
+- Listens to all messages and records them to a per-chat JSON history (no replies to plain messages)
 - Chat with AI using `!ai <message>`
 - Send an image with `!ai` to analyze it (multimodal)
 - Generate images with `!img <description>`
-- Per-chat conversation history
+- Summarize a chat's recorded history with `!summarize [extra context]`
 - Clear history with `!clear`
 
 ## Setup
@@ -34,4 +35,5 @@ npm run dev
 | `!ai <message>` | Chat with the AI |
 | `!ai` _(with image)_ | Analyze an image |
 | `!img <description>` | Generate an image |
+| `!summarize [context]` | Summarize the recorded chat history |
 | `!clear` | Clear your conversation history |
