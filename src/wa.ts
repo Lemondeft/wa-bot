@@ -406,7 +406,7 @@ export async function startBot(): Promise<void> {
                     console.log(`[${tag}] ${sender} !summarize`)
                     const summary = await summarize(history, extraContext)
                     try {
-                        await sendWithTypingAndQuote(sock, jid, summary, msg)
+                        await sock.sendMessage(jid, { text: summary }, { quoted: msg })
                     } catch (err: any) {
                         console.error('[SEND ERROR]', err?.message)
                     }
