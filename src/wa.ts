@@ -374,6 +374,7 @@ export async function startBot(): Promise<void> {
 
                 if (!text) continue
                 if (msg.message?.pollCreationMessage || msg.message?.pollUpdateMessage) continue
+                if (jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) continue
 
                 if (!(text.startsWith('!ai') && imageBase64)) {
                     appendHistory(jid, 'user', sender, text)
