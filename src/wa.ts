@@ -376,7 +376,7 @@ export async function startBot(): Promise<void> {
                 if (msg.message?.pollCreationMessage || msg.message?.pollUpdateMessage) continue
 
                 if (!(text.startsWith('!ai') && imageBase64)) {
-                    appendHistory(jid, 'user', text)
+                    appendHistory(jid, 'user', sender, text)
                 }
 
                 if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && !text.startsWith('!summarize') && text !== '!clear' && !text.startsWith('!status')) continue
@@ -578,10 +578,10 @@ export async function startBot(): Promise<void> {
                     : prompt
 
                 const history = imageBase64
-                    ? appendHistory(jid, 'user', userContent)
+                    ? appendHistory(jid, 'user', sender, userContent)
                     : loadHistory(jid)
                 const reply = await chat(history)
-                appendHistory(jid, 'assistant', reply)
+                appendHistory(jid, 'assistant', 'bot', reply)
 
                 console.log(`[${tag}] BOT ${reply.slice(0, 50)}...`)
 

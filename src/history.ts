@@ -3,6 +3,7 @@ import path from 'path';
 
 interface Message {
     role: 'user' | 'assistant';
+    sender?: string;
     content: string | Array<any>;
 }
 
@@ -30,9 +31,9 @@ export function saveHistory(jid: string, history: Message[]): void {
     fs.writeFileSync(filePath(jid), JSON.stringify(trimmed, null, 2))
 }
 
-export function appendHistory(jid: string, role: 'user' | 'assistant', content: string | Array<any>): Message[] {
+export function appendHistory(jid: string, role: 'user' | 'assistant', sender: string | undefined, content: string | Array<any>): Message[] {
     const history = loadHistory(jid)
-    history.push({ role, content })
+    history.push(sender ? { role, sender, content } : { role, content })
     saveHistory(jid, history)
     return history
 }
