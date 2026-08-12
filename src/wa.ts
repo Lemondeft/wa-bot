@@ -207,25 +207,33 @@ export async function startBot(): Promise<void> {
     let isProcessing = false
 
     currentHealthCheck = setInterval(async () => {
-        if (connectionClosed || isProcessing) return
+        if (connectionClosed || isReconnecting || isProcessing) return
 
         const ws = (sock as any).ws
-        if (!ws || ws.readyState !== 1) {
-            console.warn('[HEALTH CHECK] WebSocket not open, reconnecting...')
-            sock.end(undefined)
-            scheduleReconnect()
+        if (!ws) return
+
+        if (ws.readyState === 1) {
+            const inactiveMins = (Date.now() - lastActivity) / 60000
+            if (inactiveMins >= INACTIVE_THRESHOLD) {
+                try {
+                    await sock.sendPresenceUpdate('available')
+                    lastActivity = Date.now()
+                } catch {
+                    sock.end(undefined)
+                    scheduleReconnect()
+                }
+            }
             return
         }
 
-        const inactiveMins = (Date.now() - lastActivity) / 60000
-        if (inactiveMins >= INACTIVE_THRESHOLD) {
-            try {
-                await sock.sendPresenceUpdate('available')
-                lastActivity = Date.now()
-            } catch {
-                sock.end(undefined)
-                scheduleReconnect()
-            }
+        if (ws.readyState === 0) {
+            console.warn('[HEALTH CHECK] WebSocket connecting, waiting for baileys...')
+        } else if (ws.readyState === 2) {
+            console.warn('[HEALTH CHECK] WebSocket closing, waiting for baileys...')
+        } else {
+            console.warn('[HEALTH CHECK] WebSocket closed, reconnecting...')
+            sock.end(undefined)
+            scheduleReconnect()
         }
     }, HEALTH_CHECK_INTERVAL)
 
