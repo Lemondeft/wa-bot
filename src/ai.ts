@@ -56,14 +56,14 @@ export async function summarize(history: Message[], extraContext: string): Promi
 }
 
 async function callLLM(systemPrompt: string, messages: Message[]): Promise<string> {
-  const res = await fetch('https://api.voidai.app/v1/chat/completions', {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${process.env.KEY}`,
     },
     body: JSON.stringify({
-      model: 'gemini-3-flash-preview',
+      model: 'poolside/laguna-s-2.1:free',
       messages: [
         { role: 'system', content: systemPrompt },
         ...messages
