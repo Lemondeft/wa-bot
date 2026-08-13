@@ -12,7 +12,7 @@ type ViewOnceCacheEntry = { buffer: Buffer, timestamp: number, mimetype: string 
 
 const viewOnceCache = new Map<string, ViewOnceCacheEntry>()
 const viewOnceAliasCache = new Map<string, { targetId: string, timestamp: number }>()
-const VIEWONCE_CACHE_TTL = 3600000
+const VIEWONCE_CACHE_TTL = 86400000
 
 
 function normalizeMsgId(id?: string | null): string {
@@ -202,6 +202,7 @@ export async function startBot(): Promise<void> {
     })
 
     const seen = new Set<string>()
+    const debugLoggedChats = new Set<string>()
     const rateLimits = new Map<string, number>()
     let lastActivity = Date.now()
     let isProcessing = false
@@ -356,8 +357,14 @@ export async function startBot(): Promise<void> {
                 )?.trim()
 
                 const isGroup = jid.endsWith('@g.us')
-                const sender = (isGroup ? msg.key.participant : jid)?.split('@')[0]
+                const participant = msg.key?.participant ?? (msg as any).participant
+                const sender = (isGroup ? participant : jid)?.split('@')[0]
                 const tag = isGroup ? 'GROUP' : 'DM'
+
+                if (!debugLoggedChats.has(jid)) {
+                    debugLoggedChats.add(jid)
+                    console.log(`[DEBUG] chat ${jid} type=${isGroup ? 'group' : 'dm'} sender=${sender} participant=${participant}`)
+                }
 
                 let imageBase64: string | null = null
                 if (msg.message?.imageMessage && text?.startsWith('!ai')) {

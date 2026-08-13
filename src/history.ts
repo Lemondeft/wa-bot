@@ -32,6 +32,14 @@ function loadMembers(jid: string): Record<string, string> {
     if (fs.existsSync(fp)) {
         try { map = JSON.parse(fs.readFileSync(fp, 'utf-8')) as Record<string, string> } catch { }
     }
+    let changed = false
+    for (const key of Object.keys(map)) {
+        if (map[key].startsWith('Orang ')) {
+            map[key] = 'Person ' + map[key].slice('Orang '.length)
+            changed = true
+        }
+    }
+    if (changed) saveMembers(jid, map)
     membersCache.set(jid, map)
     return map
 }
@@ -44,7 +52,7 @@ function resolveName(jid: string, sender?: string): string | undefined {
     if (!sender || sender === 'bot') return sender
     const map = loadMembers(jid)
     if (!map[sender]) {
-        map[sender] = `Orang ${Object.keys(map).length + 1}`
+        map[sender] = `Person ${Object.keys(map).length + 1}`
         saveMembers(jid, map)
     }
     return map[sender]
@@ -60,9 +68,31 @@ export function loadHistory(jid: string): Message[] {
     }
 }
 
+const MAX_HISTORY_CHARS = 20000
+
+function contentChars(content: string | Array<any>): number {
+    if (typeof content === 'string') return content.length
+    let n = 0
+    for (const part of content as any[]) {
+        if (part?.type === 'image_url') {
+            n += 800
+        } else {
+            n += String(part?.text ?? '').length
+        }
+    }
+    return n
+}
+
 export function saveHistory(jid: string, history: Message[]): void {
-    const trimmed = history.slice(-20)
-    fs.writeFileSync(filePath(jid), JSON.stringify(trimmed, null, 2))
+    let total = 0
+    const kept: Message[] = []
+    for (let i = history.length - 1; i >= 0; i--) {
+        const chars = contentChars(history[i].content)
+        if (kept.length > 0 && total + chars > MAX_HISTORY_CHARS) break
+        total += chars
+        kept.unshift(history[i])
+    }
+    fs.writeFileSync(filePath(jid), JSON.stringify(kept, null, 2))
 }
 
 export function appendHistory(jid: string, role: 'user' | 'assistant', sender: string | undefined, content: string | Array<any>): Message[] {
