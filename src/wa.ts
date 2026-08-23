@@ -387,7 +387,7 @@ export async function startBot(): Promise<void> {
                     appendHistory(jid, 'user', sender, text)
                 }
 
-                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && !text.startsWith('!summarize') && text !== '!clear' && !text.startsWith('!status')) continue
+                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && !text.startsWith('!summarize') && text !== '!clear' && !text.startsWith('!status') && !text.startsWith('!help')) continue
 
                 const userId = msg.key.participant || jid
                 const now = Date.now()
@@ -401,6 +401,24 @@ export async function startBot(): Promise<void> {
 
                 if (text.startsWith('!status')) {
                     await sock.sendMessage(jid, { text: 'Bot is running' }, { quoted: msg })
+                    continue
+                }
+
+                if (text.startsWith('!help')) {
+                    const helpText = [
+                        '*Bot Commands*',
+                        '',
+                        '!ai <message> - chat with the ai',
+                        '!ai (with image) - analyze an image',
+                        '!img <description> - generate an image',
+                        '!summarize [context] - summarize recorded chat history',
+                        '!sticker - convert an image to a sticker',
+                        '!reveal - reveal a view-once message (reply to it)',
+                        '!clear - clear your conversation history',
+                        '!status - check if the bot is running',
+                        '!help - show this message',
+                    ].join('\n')
+                    await sock.sendMessage(jid, { text: helpText }, { quoted: msg })
                     continue
                 }
 
