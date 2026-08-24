@@ -16,6 +16,7 @@ function findYtDlp(): string {
 }
 
 const YTDLP = findYtDlp()
+try { fs.chmodSync(YTDLP, 0o755) } catch {}
 
 export type DownloadMode = 'video' | 'audio'
 
@@ -29,8 +30,6 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
         const args = [
             '-o', outTemplate,
             '--no-playlist',
-            '--js-runtimes', 'node',
-            '--print', 'title',
         ]
 
         if (mode === 'audio') {
@@ -41,18 +40,17 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
 
         args.push(url)
 
-        execFile(YTDLP, args, { timeout: 300_000 }, (err, stdout, stderr) => {
+        execFile(YTDLP, args, { timeout: 300_000 }, (err, _stdout, stderr) => {
             if (err) return reject(new Error(stderr || err.message))
 
-            const title = stdout.trim().split('\n').pop() || 'video'
-            const files = fs.readdirSync(tmpDir)
-            const filePath = files.length > 0 ? path.join(tmpDir, files[0]) : null
-
-            if (!filePath || !fs.existsSync(filePath)) {
-                return reject(new Error('Downloaded file not found'))
+            try {
+                const files = fs.readdirSync(tmpDir)
+                if (files.length === 0) return reject(new Error('Downloaded file not found'))
+                const filePath = path.join(tmpDir, files[0])
+                resolve({ path: filePath, title: url })
+            } catch (e: any) {
+                reject(e)
             }
-
-            resolve({ path: filePath, title })
         })
     })
 }
