@@ -10,7 +10,7 @@ function findYtDlp(): string {
         '/usr/local/bin/yt-dlp',
     ]
     for (const p of candidates) {
-        if (fs.existsSync(p)) return p
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) return p
     }
     return 'yt-dlp'
 }
@@ -29,7 +29,6 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
         const args = [
             '-o', outTemplate,
             '--no-playlist',
-            '--impersonate', 'chrome',
             '--js-runtimes', 'node',
             '--print', 'after_move:filepath',
             '--print', 'title',
