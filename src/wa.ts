@@ -1,8 +1,11 @@
+import fs from 'fs'
+import path from 'path'
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, proto, downloadMediaMessage } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode-terminal'
 import { appendHistory, clearHistory, loadHistory } from './history.ts'
 import { chat, summarize } from './ai.ts'
 import { generateImage } from './image.ts'
+import { download } from './yt.ts'
 import sharp from 'sharp'
 
 const RECONNECT_DELAY = 3000
@@ -387,7 +390,7 @@ export async function startBot(): Promise<void> {
                     appendHistory(jid, 'user', sender, text)
                 }
 
-                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && !text.startsWith('!summarize') && text !== '!clear' && !text.startsWith('!status') && !text.startsWith('!help')) continue
+                if (!text.startsWith('!ai') && !text.startsWith('!img') && !text.startsWith('!sticker') && !text.startsWith('!reveal') && !text.startsWith('!summarize') && text !== '!clear' && !text.startsWith('!status') && !text.startsWith('!help') && !text.startsWith('!dl')) continue
 
                 const userId = msg.key.participant || jid
                 const now = Date.now()
@@ -416,6 +419,8 @@ export async function startBot(): Promise<void> {
                         '!reveal - reveal a view-once message (reply to it)',
                         '!clear - clear your conversation history',
                         '!status - check if the bot is running',
+                        '!dl <url> - download any video',
+                        '!dla <url> - download as audio (mp3)',
                         '!help - show this message',
                     ].join('\n')
                     await sock.sendMessage(jid, { text: helpText }, { quoted: msg })
@@ -588,6 +593,42 @@ export async function startBot(): Promise<void> {
                     isProcessing = false
                     continue
                 }
+
+            if (text.startsWith('!dl')) {
+  const isAudio = text.startsWith('!dla')
+  const url = text.slice(isAudio ? 5 : 4).trim()
+  if (!url) {
+    await sock.sendMessage(jid, { text: `usage: ${isAudio ? '!dla' : '!dl'} <url>` }, { quoted: msg })
+    continue
+  }
+
+  isProcessing = true
+  console.log(`[${tag}] ${sender} ${isAudio ? '!dla' : '!dl'} ${url}`)
+  await sock.sendMessage(jid, { text: isAudio ? 'downloading audio...' : 'downloading...' }, { quoted: msg })
+
+  try {
+    const result = await download(url, isAudio ? 'audio' : 'video')
+    const fileBuffer = fs.readFileSync(result.path)
+    const ext = path.extname(result.path).toLowerCase()
+
+    if (isAudio) {
+      await sock.sendMessage(jid, { audio: fileBuffer, mimetype: 'audio/mpeg', ptt: false }, { quoted: msg })
+    } else {
+      const isVideo = ['.mp4', '.mkv', '.webm'].includes(ext)
+      if (isVideo) {
+        await sock.sendMessage(jid, { video: fileBuffer, caption: result.title }, { quoted: msg })
+      } else {
+        await sock.sendMessage(jid, { image: fileBuffer, caption: result.title }, { quoted: msg })
+      }
+    }
+    fs.unlinkSync(result.path)
+    fs.rmdirSync(path.dirname(result.path))
+  } catch (err: any) {
+    await sock.sendMessage(jid, { text: 'download failed: ' + err.message }, { quoted: msg })
+  }
+  isProcessing = false
+  continue
+}
 
             if (text.startsWith('!ai')) {
                 const prompt = text.slice(4).trim()
