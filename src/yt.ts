@@ -21,7 +21,9 @@ export type DownloadMode = 'video' | 'audio'
 
 export function download(url: string, mode: DownloadMode = 'video'): Promise<{ path: string, title: string }> {
     return new Promise((resolve, reject) => {
-        const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'yt-'))
+        const tmpBase = path.join(process.cwd(), 'tmp')
+        if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true })
+        const tmpDir = fs.mkdtempSync(path.join(tmpBase, 'yt-'))
         const outTemplate = path.join(tmpDir, '%(title)s.%(ext)s')
 
         const args = [
