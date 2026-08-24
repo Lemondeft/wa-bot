@@ -25,7 +25,7 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
         const tmpBase = path.join(process.cwd(), 'tmp')
         if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true })
         const tmpDir = fs.mkdtempSync(path.join(tmpBase, 'yt-'))
-        const outTemplate = path.join(tmpDir, 'video.%(ext)s')
+        const outTemplate = path.join(tmpDir, '%(title).60s.%(ext)s')
 
         const args = [
             '-o', outTemplate,
@@ -47,7 +47,8 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
                 const files = fs.readdirSync(tmpDir)
                 if (files.length === 0) return reject(new Error('Downloaded file not found'))
                 const filePath = path.join(tmpDir, files[0])
-                resolve({ path: filePath, title: url })
+                const title = path.parse(files[0]).name
+                resolve({ path: filePath, title })
             } catch (e: any) {
                 reject(e)
             }

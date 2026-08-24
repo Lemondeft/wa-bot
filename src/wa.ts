@@ -419,8 +419,9 @@ export async function startBot(): Promise<void> {
                         '!reveal - reveal a view-once message (reply to it)',
                         '!clear - clear your conversation history',
                         '!status - check if the bot is running',
-                        '!dl <url> - download any video',
-                        '!dla <url> - download as audio (mp3)',
+                        '!dl [-doc] <url> - download video (default: embed)',
+                        '!dla [-doc] <url> - download audio (default: embed)',
+                        '  -doc = send as file instead of playing in chat',
                         '!help - show this message',
                     ].join('\n')
                     await sock.sendMessage(jid, { text: helpText }, { quoted: msg })
@@ -596,33 +597,41 @@ export async function startBot(): Promise<void> {
 
             if (text.startsWith('!dl')) {
   const isAudio = text.startsWith('!dla')
-  const url = text.slice(isAudio ? 5 : 4).trim()
-  if (!url) {
-    await sock.sendMessage(jid, { text: `usage: ${isAudio ? '!dla' : '!dl'} <url>` }, { quoted: msg })
+  let rest = text.slice(isAudio ? 5 : 4).trim()
+
+  let mode: 'doc' | 'embed' = 'embed'
+  if (rest.startsWith('-doc ')) { mode = 'doc'; rest = rest.slice(5).trim() }
+
+  if (!rest) {
+    await sock.sendMessage(jid, { text: `usage: ${isAudio ? '!dla' : '!dl'} [-doc] <url>\ndefault: embed (plays in chat)` }, { quoted: msg })
     continue
   }
 
   isProcessing = true
-  console.log(`[${tag}] ${sender} ${isAudio ? '!dla' : '!dl'} ${url}`)
+  console.log(`[${tag}] ${sender} ${isAudio ? '!dla' : '!dl'} (${mode}) ${rest}`)
   await sock.sendMessage(jid, { text: isAudio ? 'downloading audio...' : 'downloading...' }, { quoted: msg })
 
   try {
-    const result = await download(url, isAudio ? 'audio' : 'video')
+    const result = await download(rest, isAudio ? 'audio' : 'video')
     const fileBuffer = fs.readFileSync(result.path)
     const ext = path.extname(result.path).toLowerCase()
+    const filename = result.title + ext
 
-    if (isAudio) {
-      await sock.sendMessage(jid, { audio: fileBuffer, mimetype: 'audio/mpeg', ptt: false }, { quoted: msg })
-    } else {
-      const isVideo = ['.mp4', '.mkv', '.webm'].includes(ext)
-      if (isVideo) {
-        await sock.sendMessage(jid, { video: fileBuffer, caption: result.title }, { quoted: msg })
+    if (mode === 'doc') {
+      if (isAudio) {
+        await sock.sendMessage(jid, { document: fileBuffer, fileName: filename, mimetype: 'audio/mpeg' }, { quoted: msg })
       } else {
-        await sock.sendMessage(jid, { image: fileBuffer, caption: result.title }, { quoted: msg })
+        const mimetype = ext === '.mkv' ? 'video/x-matroska' : ext === '.webm' ? 'video/webm' : 'video/mp4'
+        await sock.sendMessage(jid, { document: fileBuffer, fileName: filename, mimetype }, { quoted: msg })
+      }
+    } else {
+      if (isAudio) {
+        await sock.sendMessage(jid, { audio: fileBuffer, mimetype: 'audio/mpeg', ptt: false }, { quoted: msg })
+      } else {
+        await sock.sendMessage(jid, { video: fileBuffer, caption: result.title }, { quoted: msg })
       }
     }
-    fs.unlinkSync(result.path)
-    fs.rmdirSync(path.dirname(result.path))
+    fs.rmSync(path.dirname(result.path), { recursive: true, force: true })
   } catch (err: any) {
     await sock.sendMessage(jid, { text: 'download failed: ' + err.message }, { quoted: msg })
   }
