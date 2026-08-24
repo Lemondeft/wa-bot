@@ -8,8 +8,12 @@ A personal WhatsApp bot powered by AI with per-chat conversation history. Listen
 - Chat with AI using `!ai <message>`
 - Send an image with `!ai` to analyze it (multimodal)
 - Generate images with `!img <description>`
+- Convert images to stickers with `!sticker`
+- Reveal view-once messages with `!reveal`
 - Summarize a chat's recorded history with `!summarize [extra context]`
 - Clear history with `!clear`
+- Check bot status with `!status`
+- List all commands with `!help`
 
 ## Setup
 
@@ -35,5 +39,9 @@ npm run dev
 | `!ai <message>` | Chat with the AI |
 | `!ai` _(with image)_ | Analyze an image |
 | `!img <description>` | Generate an image |
+| `!sticker` | Convert an image to a sticker |
+| `!reveal` | Reveal a view-once message _(reply to it)_ |
 | `!summarize [context]` | Summarize the recorded chat history |
 | `!clear` | Clear your conversation history |
+| `!status` | Check if the bot is running |
+| `!help` | List all commands |
