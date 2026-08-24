@@ -24,13 +24,12 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
         const tmpBase = path.join(process.cwd(), 'tmp')
         if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true })
         const tmpDir = fs.mkdtempSync(path.join(tmpBase, 'yt-'))
-        const outTemplate = path.join(tmpDir, '%(title)s.%(ext)s')
+        const outTemplate = path.join(tmpDir, 'video.%(ext)s')
 
         const args = [
             '-o', outTemplate,
             '--no-playlist',
             '--js-runtimes', 'node',
-            '--print', 'after_move:filepath',
             '--print', 'title',
         ]
 
@@ -44,9 +43,15 @@ export function download(url: string, mode: DownloadMode = 'video'): Promise<{ p
 
         execFile(YTDLP, args, { timeout: 300_000 }, (err, stdout, stderr) => {
             if (err) return reject(new Error(stderr || err.message))
-            const lines = stdout.trim().split('\n')
-            const filePath = lines[0]
-            const title = lines[1] || 'video'
+
+            const title = stdout.trim().split('\n').pop() || 'video'
+            const files = fs.readdirSync(tmpDir)
+            const filePath = files.length > 0 ? path.join(tmpDir, files[0]) : null
+
+            if (!filePath || !fs.existsSync(filePath)) {
+                return reject(new Error('Downloaded file not found'))
+            }
+
             resolve({ path: filePath, title })
         })
     })
