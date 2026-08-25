@@ -5,7 +5,7 @@ import qrcode from 'qrcode-terminal'
 import { appendHistory, clearHistory, loadHistory } from './history.ts'
 import { chat, summarize } from './ai.ts'
 import { generateImage } from './image.ts'
-import { download } from './yt.ts'
+import { download, cleanup } from './yt.ts'
 import sharp from 'sharp'
 
 const RECONNECT_DELAY = 3000
