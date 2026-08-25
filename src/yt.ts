@@ -43,7 +43,7 @@ function downloadViaYtdlp(url: string, mode: DownloadMode): Promise<{ path: stri
         if (mode === 'audio') {
             args.push('-x', '--audio-format', 'mp3')
         } else {
-            args.push('-f', 'bestvideo[height<=720][vcodec^=avc1]+bestaudio/best[height<=720]/best', '--merge-output-format', 'mp4', '--prefer-free-formats=false')
+            args.push('-f', 'bestvideo[height<=720][vcodec^=avc1]+bestaudio/best[height<=720]/best', '--merge-output-format', 'mp4', '--no-prefer-free-formats')
         }
 
         args.push(url)
