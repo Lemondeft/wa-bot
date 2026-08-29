@@ -15,6 +15,7 @@ type ViewOnceCacheEntry = { buffer: Buffer, timestamp: number, mimetype: string 
 
 const viewOnceCache = new Map<string, ViewOnceCacheEntry>()
 const viewOnceAliasCache = new Map<string, { targetId: string, timestamp: number }>()
+const viewOnceReverseAlias = new Map<string, Set<string>>()
 const VIEWONCE_CACHE_TTL = 86400000
 
 
@@ -27,6 +28,16 @@ function setViewOnceAlias(sourceId?: string | null, targetId?: string | null) {
     const target = normalizeMsgId(targetId)
     if (!source || !target || source === target) return
     viewOnceAliasCache.set(source, { targetId: target, timestamp: Date.now() })
+
+    if (!viewOnceReverseAlias.has(target)) {
+        viewOnceReverseAlias.set(target, new Set())
+    }
+    viewOnceReverseAlias.get(target)!.add(source)
+
+    const cached = viewOnceCache.get(target)
+    if (cached && !viewOnceCache.has(source)) {
+        viewOnceCache.set(source, { ...cached, timestamp: Date.now() })
+    }
 }
 
 function resolveViewOnceId(id: string): string {
@@ -64,11 +75,17 @@ function getViewOnceMimeType(viewOnceMsg: any) {
 }
 
 function cacheViewOnce(id: string, buffer: Buffer, mimetype: string) {
-    viewOnceCache.set(id, {
-        buffer,
-        timestamp: Date.now(),
-        mimetype
-    })
+    const entry = { buffer, timestamp: Date.now(), mimetype }
+    viewOnceCache.set(id, entry)
+
+    const reverseAliases = viewOnceReverseAlias.get(id)
+    if (reverseAliases) {
+        for (const aliasId of reverseAliases) {
+            if (!viewOnceCache.has(aliasId)) {
+                viewOnceCache.set(aliasId, { ...entry })
+            }
+        }
+    }
 }
 
 async function sendBufferedMedia(sock: any, jid: string, buffer: Buffer, mimetype: string, quoted: proto.IWebMessageInfo, caption = 'Revealed') {
@@ -251,6 +268,23 @@ export async function startBot(): Promise<void> {
         for (const [sourceId, alias] of viewOnceAliasCache.entries()) {
             if (now - alias.timestamp > VIEWONCE_CACHE_TTL) {
                 viewOnceAliasCache.delete(sourceId)
+                for (const [, sources] of viewOnceReverseAlias) {
+                    sources.delete(sourceId)
+                }
+            }
+        }
+        for (const [targetId, sources] of viewOnceReverseAlias) {
+            if (!viewOnceCache.has(targetId) && !viewOnceAliasCache.has(targetId)) {
+                viewOnceReverseAlias.delete(targetId)
+            } else {
+                for (const sourceId of sources) {
+                    if (!viewOnceCache.has(sourceId) && !viewOnceAliasCache.has(sourceId)) {
+                        sources.delete(sourceId)
+                    }
+                }
+                if (sources.size === 0) {
+                    viewOnceReverseAlias.delete(targetId)
+                }
             }
         }
     }, 600000)
@@ -468,8 +502,9 @@ export async function startBot(): Promise<void> {
                     const cached = viewOnceCache.get(normalizedQuotedId) || viewOnceCache.get(resolvedQuotedId)
 
                     if (cached) {
+                        const viaAlias = normalizedQuotedId !== resolvedQuotedId && viewOnceCache.has(resolvedQuotedId)
                         await sendBufferedMedia(sock, jid, cached.buffer, cached.mimetype, msg)
-                        console.log(`[${tag}] ${sender} revealed (cached: ${normalizedQuotedId} -> ${resolvedQuotedId}, ${cached.mimetype})`)
+                        console.log(`[${tag}] ${sender} revealed (cached${viaAlias ? ' via alias' : ''}: ${normalizedQuotedId} -> ${resolvedQuotedId}, ${cached.mimetype})`)
                         continue
                     }
 
