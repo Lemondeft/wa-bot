@@ -91,6 +91,9 @@ async function callLLM(systemPrompt: string, messages: Message[]): Promise<strin
       ],
       max_tokens: 1000,
       temperature: 0.7,
+      tools: [
+        { type: 'openrouter:web_search' }
+      ],
     })
   })
   const raw = await res.text()
