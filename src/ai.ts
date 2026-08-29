@@ -51,6 +51,7 @@ Rules:
 - Summarize in the language the conversation is mostly written in (e.g. Indonesian chat -> Indonesian summary).
 - Never invent facts not present in the transcript. If there is barely any real conversation, say that instead of padding.
 - Use emojis sparingly, only to mark important or actionable points.
+- If theres anything important, like a decision, plan, or question, highlight it with emoticon and put it at the start of a line. For example: "⚡️ Important: we need to decide on a date for the trip."
 `
 
 function senderLabel(m: Message): string {
@@ -83,7 +84,7 @@ async function callLLM(systemPrompt: string, messages: Message[]): Promise<strin
       'Authorization': `Bearer ${process.env.KEY}`,
     },
     body: JSON.stringify({
-      model: 'poolside/laguna-s-2.1:free',
+      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
       messages: [
         { role: 'system', content: systemPrompt },
         ...messages
