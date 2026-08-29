@@ -110,33 +110,42 @@ function inferMimeTypeFromBuffer(buffer: Buffer): string {
 
 
 
-function splitIntoChunks(text: string, maxSize = 150): string[] {
-    const sentences = text.match(/[^.!?\n]+[.!?\n]*/g) ?? [text]
-    const chunks: string[] = []
-    let current = ''
+function splitIntoChunks(text: string, maxSize = 3000): string[] {
+    if (text.length <= maxSize) return [text]
 
-    for (const sentence of sentences) {
-        if ((current + sentence).length > maxSize && current) {
-            chunks.push(current.trim())
-            current = sentence
-        } else {
-            current += sentence
+    const chunks: string[] = []
+    let remaining = text
+
+    while (remaining.length > 0) {
+        if (remaining.length <= maxSize) {
+            chunks.push(remaining)
+            break
         }
+
+        let cutAt = remaining.lastIndexOf('\n\n', maxSize)
+        if (cutAt <= 0) cutAt = remaining.lastIndexOf('\n', maxSize)
+        if (cutAt <= 0) cutAt = remaining.lastIndexOf('. ', maxSize)
+        if (cutAt <= 0) cutAt = remaining.lastIndexOf('! ', maxSize)
+        if (cutAt <= 0) cutAt = remaining.lastIndexOf('? ', maxSize)
+        if (cutAt <= 0) cutAt = remaining.lastIndexOf(', ', maxSize)
+        if (cutAt <= 0) cutAt = maxSize
+
+        chunks.push(remaining.slice(0, cutAt).trim())
+        remaining = remaining.slice(cutAt).trim()
     }
 
-    if (current.trim()) chunks.push(current.trim())
-    return chunks
+    return chunks.filter(c => c.length > 0)
 }
 
 async function sendWithTypingAndQuote(sock: any, jid: string, text: string, quotedMsg?: proto.IWebMessageInfo) {
-    const chunks = splitIntoChunks(text, 150)
+    const chunks = splitIntoChunks(text, 3000)
 
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i]!
 
         try { await sock.sendPresenceUpdate('composing', jid) } catch { }
 
-        const delay = Math.min(300 + chunk.length * 18 + Math.random() * 300, 2500)
+        const delay = Math.min(500 + chunk.length * 5 + Math.random() * 500, 3000)
         await new Promise(res => setTimeout(res, delay))
 
         if (i === 0 && quotedMsg) {
@@ -146,7 +155,9 @@ async function sendWithTypingAndQuote(sock: any, jid: string, text: string, quot
         }
 
         try { await sock.sendPresenceUpdate('paused', jid) } catch { }
-        await new Promise(res => setTimeout(res, 400 + Math.random() * 400))
+        if (i < chunks.length - 1) {
+            await new Promise(res => setTimeout(res, 300 + Math.random() * 300))
+        }
     }
 
     try { await sock.sendPresenceUpdate('available', jid) } catch { }
